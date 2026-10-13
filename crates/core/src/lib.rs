@@ -5,6 +5,7 @@ pub mod crop_edit;
 pub mod decode;
 pub mod encode;
 pub mod error;
+pub mod export;
 pub mod geometry;
 pub mod model;
 pub mod persist;

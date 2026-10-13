@@ -2469,6 +2469,7 @@ dependencies = [
  "kamadak-exif",
  "natord",
  "pagecrop-testkit",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",

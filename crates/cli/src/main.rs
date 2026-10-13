@@ -1,11 +1,13 @@
 //! Thin terminal commands that call the library crates, for testing without a window.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 use pagecrop_core::decode::{format_taken, load_oriented, read_orientation};
 use pagecrop_core::encode::write_jpeg;
+use pagecrop_core::export::{ExportOptions, Outcome, Progress, plan, run};
 use pagecrop_core::geometry::Resize;
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
 use pagecrop_core::render::render;
@@ -35,6 +37,28 @@ enum Command {
         dir: PathBuf,
         #[arg(long, value_enum, default_value_t = SortArg::Name)]
         sort: SortArg,
+    },
+    /// Export every picture with its settings into an output folder. Exits with code 2 when a
+    /// picture could not be exported.
+    Export {
+        dir: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        /// Shrink so the longer side is this many pixels at most.
+        #[arg(long, conflicts_with_all = ["percent", "no_resize"])]
+        long_edge: Option<u32>,
+        /// Shrink to this percentage of the cropped size.
+        #[arg(long, conflicts_with = "no_resize")]
+        percent: Option<f32>,
+        /// Keep the cropped size.
+        #[arg(long)]
+        no_resize: bool,
+        /// JPEG quality, 1 to 100.
+        #[arg(long, default_value_t = 90, value_parser = clap::value_parser!(u8).range(1..=100))]
+        quality: u8,
+        /// Replace files that already exist in the output folder.
+        #[arg(long)]
+        overwrite: bool,
     },
     /// Turn, crop and shrink one picture, and write it as a JPEG.
     Render {
@@ -120,6 +144,65 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
+        Command::Export {
+            dir,
+            out,
+            long_edge,
+            percent,
+            no_resize,
+            quality,
+            overwrite,
+        } => {
+            let project =
+                Project::open(&dir).with_context(|| format!("opening {}", dir.display()))?;
+            let resize = match (long_edge, percent, no_resize) {
+                (Some(n), _, _) => Resize::LongEdge(n),
+                (None, Some(p), _) => Resize::Percent(p),
+                (None, None, true) => Resize::None,
+                (None, None, false) => ExportOptions::default().resize,
+            };
+            let opts = ExportOptions {
+                out_dir: out.clone(),
+                resize,
+                quality,
+                overwrite,
+            };
+            let jobs = plan(&project, &opts)
+                .with_context(|| format!("planning the export to {}", out.display()))?;
+            let failed = AtomicUsize::new(0);
+            run(
+                &jobs,
+                &opts,
+                &AtomicBool::new(false),
+                &|progress| match progress {
+                    Progress::Item { index, outcome } => {
+                        let name = project
+                            .entries
+                            .get(index)
+                            .map_or("?", |e| e.file_name.as_str());
+                        match outcome {
+                            Outcome::Written => println!("{name} written"),
+                            Outcome::Skipped => println!("{name} skipped"),
+                            Outcome::Failed(reason) => println!("{name} failed: {reason}"),
+                        }
+                    }
+                    Progress::Finished {
+                        written,
+                        skipped,
+                        failed: count,
+                        ..
+                    } => {
+                        failed.store(count, Ordering::Relaxed);
+                        println!("{written} written, {skipped} skipped, {count} failed");
+                    }
+                    Progress::Started { .. } => {}
+                },
+            )
+            .context("exporting the pictures")?;
+            if failed.load(Ordering::Relaxed) > 0 {
+                std::process::exit(2);
+            }
+        }
         Command::Render {
             file,
             out,

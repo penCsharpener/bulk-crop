@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
+use crate::export::ExportOptions;
 use crate::model::{Adjust, Project, SortBy};
 
 /// The settings file name, kept in the photo folder.
@@ -17,6 +18,8 @@ pub const SIDECAR_NAME: &str = "pagecrop.json";
 pub struct Saved {
     pub sort: SortBy,
     pub keys: BTreeMap<String, Adjust>,
+    /// The export options, if the file has them.
+    pub export: Option<ExportOptions>,
 }
 
 /// The settings file as it is written.
@@ -26,6 +29,7 @@ struct File {
     version: u32,
     sort: SortBy,
     keys: BTreeMap<String, Adjust>,
+    export: Option<ExportOptions>,
 }
 
 impl Default for File {
@@ -34,6 +38,7 @@ impl Default for File {
             version: 1,
             sort: SortBy::Name,
             keys: BTreeMap::new(),
+            export: None,
         }
     }
 }
@@ -55,6 +60,7 @@ pub fn save(project: &Project) -> Result<(), CoreError> {
     let file = File {
         sort: project.sort,
         keys,
+        export: Some(project.export.clone()),
         ..File::default()
     };
     let path = project.dir.join(SIDECAR_NAME);
@@ -86,6 +92,7 @@ pub fn load(dir: &Path) -> Result<Option<Saved>, CoreError> {
     Ok(Some(Saved {
         sort: file.sort,
         keys: file.keys,
+        export: file.export,
     }))
 }
 
@@ -99,6 +106,7 @@ fn io_error(path: &Path, source: std::io::Error) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::Resize;
 
     fn folder_with(names: &[&str]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -182,5 +190,30 @@ mod tests {
         )
         .unwrap();
         assert!(load(dir.path()).unwrap().is_some());
+    }
+
+    #[test]
+    fn export_options_round_trip() {
+        let dir = folder_with(&["page_001.jpg"]);
+        let mut project = Project::open(dir.path()).unwrap();
+        project.export.quality = 70;
+        project.export.overwrite = true;
+        project.export.resize = Resize::Percent(40.0);
+        save(&project).unwrap();
+        let reopened = Project::open(dir.path()).unwrap();
+        assert_eq!(reopened.export, project.export);
+    }
+
+    #[test]
+    fn file_without_export_gets_the_folder_default() {
+        let dir = folder_with(&["page_001.jpg"]);
+        std::fs::write(
+            dir.path().join(SIDECAR_NAME),
+            r#"{"version":1,"sort":"name","keys":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(load(dir.path()).unwrap().unwrap().export, None);
+        let project = Project::open(dir.path()).unwrap();
+        assert_eq!(project.export, ExportOptions::for_folder(dir.path()));
     }
 }
