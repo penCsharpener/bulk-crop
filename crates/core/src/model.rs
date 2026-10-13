@@ -224,6 +224,22 @@ impl Project {
     }
 }
 
+/// The pages whose previews are wanted, in the order they are needed: the selected page, the two
+/// after it, then the one before. Only pages inside `0..count` are listed.
+pub fn read_ahead_order(selected: usize, count: usize) -> Vec<usize> {
+    let before = selected.checked_sub(1);
+    [
+        Some(selected),
+        Some(selected + 1),
+        Some(selected + 2),
+        before,
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|&i| i < count)
+    .collect()
+}
+
 fn file_name_of(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -444,6 +460,14 @@ mod tests {
         assert_eq!(project.keyed_page_from(7, false), Some(3));
         assert_eq!(project.keyed_page_from(0, false), None);
         assert_eq!(project.keyed_page_from(7, true), None);
+    }
+
+    #[test]
+    fn read_ahead_order_is_selected_then_two_after_then_one_before() {
+        assert_eq!(read_ahead_order(4, 12), vec![4, 5, 6, 3]);
+        assert_eq!(read_ahead_order(0, 12), vec![0, 1, 2]);
+        assert_eq!(read_ahead_order(11, 12), vec![11, 10]);
+        assert_eq!(read_ahead_order(0, 0), Vec::<usize>::new());
     }
 
     #[test]
