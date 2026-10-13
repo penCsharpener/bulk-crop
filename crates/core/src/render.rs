@@ -1,10 +1,11 @@
 //! Renders one picture: turns and crops it, then shrinks it to the output size.
 
 use image::imageops::{self, FilterType};
-use image::{Rgb, RgbImage};
+use image::{DynamicImage, GrayImage, Rgb, RgbImage};
 
 use crate::geometry::{Resize, Size, base_size, frame_to_src, output_size};
 use crate::model::Adjust;
+use crate::tone::{apply, lookup, lut, to_gray};
 
 /// The picture turned and cropped by `adj`, at `out_w` by `out_h` pixels. Pixels are sampled
 /// bilinearly; positions outside the source are white.
@@ -47,6 +48,31 @@ pub fn render_rgb(src: &RgbImage, adj: &Adjust, resize: Resize) -> RgbImage {
     }
 }
 
+/// The picture as it is exported: rendered, then greyscale if set, then the brightness and contrast
+/// table unless both are zero. A greyscale picture is returned as one channel.
+pub fn render(src: &RgbImage, adj: &Adjust, resize: Resize) -> DynamicImage {
+    let mut img = render_rgb(src, adj, resize);
+    let table =
+        (adj.brightness != 0 || adj.contrast != 0).then(|| lut(adj.brightness, adj.contrast));
+    if adj.grayscale {
+        let mut gray = to_gray(&img);
+        if let Some(table) = &table {
+            apply_luma(&mut gray, table);
+        }
+        return DynamicImage::ImageLuma8(gray);
+    }
+    if let Some(table) = &table {
+        apply(&mut img, table);
+    }
+    DynamicImage::ImageRgb8(img)
+}
+
+fn apply_luma(gray: &mut GrayImage, table: &[u8; 256]) {
+    for pixel in gray.pixels_mut() {
+        pixel.0[0] = lookup(table, pixel.0[0]);
+    }
+}
+
 /// Source positions beyond this are far outside any picture; clamping keeps the integer maths safe.
 const LIMIT: f32 = 1.0e9;
 
@@ -86,6 +112,7 @@ fn texel(src: &RgbImage, x: i64, y: i64) -> [f32; 3] {
 mod tests {
     use super::*;
     use crate::model::CropRect;
+
     use pagecrop_testkit::page_image;
 
     fn gradient(w: u32, h: u32) -> RgbImage {
@@ -178,5 +205,18 @@ mod tests {
         let adj = crop_only(0.0, 0.0, 0.66, 0.76);
         let out = render_rgb(&src, &adj, Resize::LongEdge(800));
         assert_eq!(out.dimensions(), (800, 691));
+    }
+
+    #[test]
+    fn render_gray_returns_luma8() {
+        let src = gradient(8, 6);
+        let adj = Adjust {
+            grayscale: true,
+            ..Adjust::default()
+        };
+        assert!(matches!(
+            render(&src, &adj, Resize::None),
+            DynamicImage::ImageLuma8(_)
+        ));
     }
 }

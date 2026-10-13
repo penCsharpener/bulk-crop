@@ -4,12 +4,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
-use image::DynamicImage;
 use pagecrop_core::decode::{format_taken, load_oriented, read_orientation};
 use pagecrop_core::encode::write_jpeg;
 use pagecrop_core::geometry::Resize;
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
-use pagecrop_core::render::render_rgb;
+use pagecrop_core::render::render;
 
 /// Command-line front end for pagecrop. Commands are added as the core functions they call exist.
 #[derive(Parser)]
@@ -57,6 +56,15 @@ enum Command {
         /// Shrink to this percentage of the cropped size.
         #[arg(long, conflicts_with = "long_edge")]
         percent: Option<f32>,
+        /// Brightness, -100 to 100.
+        #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
+        brightness: i32,
+        /// Contrast, -100 to 100.
+        #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
+        contrast: i32,
+        /// Write the picture in greyscale.
+        #[arg(long)]
+        gray: bool,
         /// JPEG quality, 1 to 100.
         #[arg(long, default_value_t = 90)]
         quality: u8,
@@ -119,6 +127,9 @@ fn main() -> anyhow::Result<()> {
             crop,
             long_edge,
             percent,
+            brightness,
+            contrast,
+            gray,
             quality,
         } => {
             anyhow::ensure!(
@@ -132,7 +143,9 @@ fn main() -> anyhow::Result<()> {
                 quarter_turns: turns,
                 angle_deg: angle,
                 crop,
-                ..Adjust::default()
+                brightness,
+                contrast,
+                grayscale: gray,
             }
             .normalized();
             let resize = match (long_edge, percent) {
@@ -140,9 +153,9 @@ fn main() -> anyhow::Result<()> {
                 (None, Some(p)) => Resize::Percent(p),
                 (None, None) => Resize::None,
             };
-            let img = render_rgb(&src, &adjust, resize);
-            let (w, h) = img.dimensions();
-            write_jpeg(&out, &DynamicImage::ImageRgb8(img), quality)
+            let img = render(&src, &adjust, resize);
+            let (w, h) = (img.width(), img.height());
+            write_jpeg(&out, &img, quality)
                 .with_context(|| format!("writing {}", out.display()))?;
             println!("wrote {w}x{h} to {}", out.display());
         }
