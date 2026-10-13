@@ -6,3 +6,10 @@ edition.workspace = true
 [lib]
 name = "pagecrop_core"
 path = "src/lib.rs"
+
+[dependencies]
+natord = "1.0.9"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use pagecrop_core::model::Project;
 
 /// Command-line front end for pagecrop. Commands are added as the core functions they call exist.
 #[derive(Parser)]
@@ -15,6 +16,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List the pictures in a folder, one name per line, then the count.
+    Scan { dir: PathBuf },
     /// Write a synthetic book of tilted pages into a folder, for testing.
     GenFixtures {
         /// Folder to write into; created if missing.
@@ -33,6 +36,14 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
+        Command::Scan { dir } => {
+            let project =
+                Project::open(&dir).with_context(|| format!("scanning {}", dir.display()))?;
+            for entry in &project.entries {
+                println!("{}", entry.file_name);
+            }
+            println!("{} images", project.entries.len());
+        }
         Command::GenFixtures {
             dir,
             count,
