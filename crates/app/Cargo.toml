@@ -10,3 +10,5 @@ path = "src/main.rs"
 [dependencies]
 eframe = "0.36.2"
 egui = "0.36.2"
+pagecrop-core = { version = "0.1.0", path = "../core" }
+rfd = "0.17.2"

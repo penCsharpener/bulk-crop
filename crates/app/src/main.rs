@@ -4,7 +4,10 @@ mod app;
 mod editor;
 mod panels;
 
+use std::path::PathBuf;
+
 fn main() -> eframe::Result {
+    let folder = std::env::args_os().nth(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("pagecrop")
@@ -15,9 +18,9 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "pagecrop",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            Ok(Box::new(app::App::default()))
+            Ok(Box::new(app::App::new(folder)))
         }),
     )
 }
