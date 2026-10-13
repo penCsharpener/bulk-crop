@@ -26,10 +26,10 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
     let current = app.effective();
     ui.horizontal(|ui| {
         if ui.button("⟲ 90°").clicked() {
-            edit_once(app, quarter_turn(current, false));
+            app.edit_once(quarter_turn(current, false));
         }
         if ui.button("⟳ 90°").clicked() {
-            edit_once(app, quarter_turn(current, true));
+            app.edit_once(quarter_turn(current, true));
         }
     });
     let mut angle = current.angle_deg;
@@ -48,13 +48,10 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
         },
     );
     if ui.button("0°").clicked() {
-        edit_once(
-            app,
-            Adjust {
-                angle_deg: 0.0,
-                ..current
-            },
-        );
+        app.edit_once(Adjust {
+            angle_deg: 0.0,
+            ..current
+        });
     }
 }
 
@@ -83,24 +80,18 @@ fn tone(app: &mut App, ui: &mut egui::Ui) {
     );
     let mut grey = current.grayscale;
     if ui.checkbox(&mut grey, "Greyscale").changed() {
-        edit_once(
-            app,
-            Adjust {
-                grayscale: grey,
-                ..current
-            },
-        );
+        app.edit_once(Adjust {
+            grayscale: grey,
+            ..current
+        });
     }
     if ui.button("Reset tone").clicked() {
-        edit_once(
-            app,
-            Adjust {
-                brightness: 0,
-                contrast: 0,
-                grayscale: false,
-                ..current
-            },
-        );
+        app.edit_once(Adjust {
+            brightness: 0,
+            contrast: 0,
+            grayscale: false,
+            ..current
+        });
     }
 }
 
@@ -117,13 +108,6 @@ fn track(app: &mut App, response: &egui::Response, adjust: Adjust) {
     if response.drag_stopped() || at_once {
         app.commit_edit();
     }
-}
-
-/// One whole edit for a button: begin, apply, commit.
-fn edit_once(app: &mut App, adjust: Adjust) {
-    app.begin_edit();
-    app.apply_edit(adjust);
-    app.commit_edit();
 }
 
 fn view(app: &mut App, ui: &mut egui::Ui) {

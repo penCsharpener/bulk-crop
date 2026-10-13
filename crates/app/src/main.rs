@@ -3,6 +3,7 @@
 mod app;
 mod editor;
 mod export_dialog;
+mod help;
 mod loader;
 mod panels;
 

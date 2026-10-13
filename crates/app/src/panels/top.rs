@@ -9,10 +9,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("pagecrop");
             if ui.button("Open folder…").clicked() {
-                open_with_dialog(app);
+                app.choose_folder();
             }
             if ui.button("Export…").clicked() {
                 app.export_dialog.open = true;
+            }
+            if ui.button("?").clicked() {
+                app.help_open = !app.help_open;
             }
             ui.separator();
             if ui
@@ -36,10 +39,4 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             }
         });
     });
-}
-
-fn open_with_dialog(app: &mut App) {
-    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-        app.open_folder(&dir);
-    }
 }

@@ -36,6 +36,30 @@ impl History {
         }
     }
 
+    /// Records an edit like `push`, except that when it continues the last edit on the same page,
+    /// the two become one step. A run of nudges on one page then undoes in one go.
+    pub fn extend(&mut self, edit: Edit) {
+        let continues = self
+            .undo
+            .last()
+            .is_some_and(|last| last.index == edit.index && last.after == edit.before);
+        if !continues {
+            self.push(edit);
+            return;
+        }
+        self.redo.clear();
+        if let Some(last) = self.undo.last_mut() {
+            last.after = edit.after;
+        }
+        if self
+            .undo
+            .last()
+            .is_some_and(|last| last.before == last.after)
+        {
+            self.undo.pop();
+        }
+    }
+
     /// Takes back the most recent edit. Returns the index of the page it changed, or None when
     /// there is nothing to undo or the page no longer exists.
     pub fn undo(&mut self, project: &mut Project) -> Option<usize> {
@@ -166,6 +190,19 @@ mod tests {
         history.push(edit(3, brightness(10), brightness(10)));
         assert!(!history.can_undo());
         assert_eq!(history.undo(&mut project), None);
+    }
+
+    #[test]
+    fn consecutive_edits_on_one_page_undo_together() {
+        let mut project = pages();
+        let mut history = History::default();
+        project.set_key(3, brightness(10).unwrap());
+        history.extend(edit(3, None, brightness(10)));
+        project.set_key(3, brightness(20).unwrap());
+        history.extend(edit(3, brightness(10), brightness(20)));
+        assert_eq!(history.undo(&mut project), Some(3));
+        assert_eq!(project.entries[3].key, None);
+        assert!(!history.can_undo());
     }
 
     #[test]

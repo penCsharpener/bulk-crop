@@ -207,6 +207,18 @@ impl Project {
         i..end
     }
 
+    /// The nearest page before or after `from` that has its own settings, searching forward or
+    /// backward. None when there is no such page.
+    pub fn keyed_page_from(&self, from: usize, forward: bool) -> Option<usize> {
+        if forward {
+            (from + 1..self.entries.len()).find(|&i| self.has_key(i))
+        } else {
+            (0..from.min(self.entries.len()))
+                .rev()
+                .find(|&i| self.has_key(i))
+        }
+    }
+
     fn has_key(&self, i: usize) -> bool {
         self.entries.get(i).is_some_and(|e| e.key.is_some())
     }
@@ -421,6 +433,17 @@ mod tests {
         assert_eq!(a.brightness, 100);
         assert_eq!(a.contrast, -100);
         assert!(a.grayscale);
+    }
+
+    #[test]
+    fn keyed_page_steps_between_own_settings() {
+        let mut project = pages(12);
+        project.set_key(3, brightness(10));
+        project.set_key(7, brightness(20));
+        assert_eq!(project.keyed_page_from(3, true), Some(7));
+        assert_eq!(project.keyed_page_from(7, false), Some(3));
+        assert_eq!(project.keyed_page_from(0, false), None);
+        assert_eq!(project.keyed_page_from(7, true), None);
     }
 
     #[test]

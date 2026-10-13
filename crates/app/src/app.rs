@@ -7,13 +7,14 @@ use std::time::Instant;
 use image::RgbImage;
 use pagecrop_core::crop_edit::Handle;
 use pagecrop_core::error::CoreError;
+use pagecrop_core::geometry::quarter_turn;
 use pagecrop_core::history::{Edit, History};
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
 use pagecrop_core::persist::{self, SIDECAR_NAME};
 
 use crate::export_dialog::{self, ExportDialog};
 use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
-use crate::{editor, panels};
+use crate::{editor, help, panels};
 
 /// All state of the window.
 pub struct App {
@@ -57,6 +58,8 @@ pub struct App {
     /// A note about the folder, such as an unreadable settings file that was kept.
     pub notice: Option<String>,
     pub export_dialog: ExportDialog,
+    /// Whether the window that lists the shortcuts is open.
+    pub help_open: bool,
     /// The changes that can be undone and redone.
     pub history: History,
     /// How far the picture is zoomed in the editor: 1 fits it to the area, up to 8.
@@ -66,6 +69,10 @@ pub struct App {
     /// The page being changed and its settings before the change, from `begin_edit` until
     /// `commit_edit`.
     edit_start: Option<(usize, Option<Adjust>)>,
+    /// Set just before an edit that continues the last one, so the two undo together.
+    merge_next: bool,
+    /// The page whose fine angle the last key press changed, while no other edit has come since.
+    nudge_page: Option<usize>,
 }
 
 /// A preview of one page.
@@ -135,10 +142,13 @@ impl App {
             save_error: None,
             notice: None,
             export_dialog: ExportDialog::default(),
+            help_open: false,
             history: History::default(),
             zoom_factor: 1.0,
             pan: egui::Vec2::ZERO,
             edit_start: None,
+            merge_next: false,
+            nudge_page: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
@@ -210,6 +220,7 @@ impl App {
     /// Selects page `index`, clamped to the last page.
     pub fn select(&mut self, index: usize) {
         self.selected = index.min(self.page_count().saturating_sub(1));
+        self.nudge_page = None;
     }
 
     /// Takes the finished previews that belong to the page on screen.
@@ -344,15 +355,21 @@ impl App {
 
     /// Finishes an edit: records it in the history when the page changed, and saves the settings.
     pub fn commit_edit(&mut self) {
+        let merge = std::mem::take(&mut self.merge_next);
+        self.nudge_page = None;
         if let Some((index, before)) = self.edit_start.take()
             && let Some(entry) = self.project.as_ref().and_then(|p| p.entries.get(index))
         {
-            let after = entry.key;
-            self.history.push(Edit {
+            let edit = Edit {
                 index,
                 before,
-                after,
-            });
+                after: entry.key,
+            };
+            if merge {
+                self.history.extend(edit);
+            } else {
+                self.history.push(edit);
+            }
         }
         self.save_settings();
     }
@@ -471,6 +488,55 @@ impl App {
         self.save_settings();
     }
 
+    /// Asks for a folder in the file dialog and opens it.
+    pub fn choose_folder(&mut self) {
+        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+            self.open_folder(&dir);
+        }
+    }
+
+    /// Makes one whole edit of the selected page: begin, apply, commit.
+    pub fn edit_once(&mut self, adjust: Adjust) {
+        self.begin_edit();
+        self.apply_edit(adjust);
+        self.commit_edit();
+    }
+
+    /// Moves the fine angle of the selected page by `degrees`, kept to the hundredth and within the
+    /// slider's range.
+    pub fn nudge_angle(&mut self, degrees: f32) {
+        let page = self.selected;
+        let current = self.effective();
+        let angle = ((current.angle_deg + degrees) * 100.0).round() / 100.0;
+        // Presses in a row on one page are one undo step.
+        self.merge_next = self.nudge_page == Some(page);
+        self.edit_once(Adjust {
+            angle_deg: angle.clamp(-15.0, 15.0),
+            ..current
+        });
+        self.nudge_page = Some(page);
+    }
+
+    /// Turns the selected page a quarter turn clockwise or anticlockwise.
+    pub fn turn(&mut self, clockwise: bool) {
+        let turned = quarter_turn(self.effective(), clockwise);
+        self.edit_once(turned);
+    }
+
+    /// Selects the next or previous page that has its own settings. The selection stays when there
+    /// is none.
+    pub fn select_keyed(&mut self, forward: bool) {
+        let Some(index) = self
+            .project
+            .as_ref()
+            .and_then(|p| p.keyed_page_from(self.selected, forward))
+        else {
+            return;
+        };
+        self.select(index);
+        self.reveal_selected = true;
+    }
+
     fn is_current(&self, index: usize, generation: u64) -> bool {
         generation == self.preview_generation && index == self.selected
     }
@@ -495,18 +561,28 @@ impl App {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
-        if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::E)) {
-            self.export_dialog.open = !self.export_dialog.open;
-        }
-        // Letters and arrows typed into a text field belong to the field, not to the shortcuts.
+        // Letters, digits and arrows typed into a text field belong to the field, not to the
+        // shortcuts.
         if ctx.egui_wants_keyboard_input() {
             return;
         }
-        if ctx.input(|input| input.key_pressed(egui::Key::Num0)) {
+        let pressed = |key: egui::Key| ctx.input(|input| input.key_pressed(key));
+        let modifiers = ctx.input(|input| input.modifiers);
+        let plain = !modifiers.command && !modifiers.alt;
+        let idle = !self.export_dialog.is_running() && !self.editing();
+        if modifiers.command && pressed(egui::Key::E) {
+            self.export_dialog.open = !self.export_dialog.open;
+        }
+        if modifiers.command && idle && pressed(egui::Key::O) {
+            self.choose_folder();
+        }
+        if pressed(egui::Key::F1) {
+            self.help_open = !self.help_open;
+        }
+        if pressed(egui::Key::Num0) {
             self.reset_view();
         }
         let (undo, redo) = ctx.input(history_keys_pressed);
-        let idle = !self.export_dialog.is_running() && !self.editing();
         if undo && idle {
             self.undo();
         }
@@ -516,8 +592,17 @@ impl App {
         if ctx.input(result_key_pressed) {
             self.show_result = !self.show_result;
         }
+        if plain && pressed(egui::Key::G) {
+            self.show_grid = !self.show_grid;
+        }
         if self.page_count() == 0 {
             return;
+        }
+        if plain && idle {
+            self.edit_keys(&pressed, modifiers.shift);
+        }
+        if plain && pressed(egui::Key::N) {
+            self.select_keyed(!modifiers.shift);
         }
         let current = self.selected;
         let last = self.page_count().saturating_sub(1);
@@ -525,6 +610,25 @@ impl App {
         if let Some(index) = target {
             self.select(index);
             self.reveal_selected = true;
+        }
+    }
+
+    /// The keys that change the settings of the selected page: R turns it, [ and ] move the fine
+    /// angle (Shift for whole degrees), and Delete resets the page.
+    fn edit_keys(&mut self, pressed: &dyn Fn(egui::Key) -> bool, shift: bool) {
+        if pressed(egui::Key::R) {
+            self.turn(!shift);
+        }
+        // With Shift held, the brackets arrive as the curly-bracket keys.
+        let step = if shift { 1.0 } else { 0.1 };
+        if pressed(egui::Key::OpenBracket) || pressed(egui::Key::OpenCurlyBracket) {
+            self.nudge_angle(-step);
+        }
+        if pressed(egui::Key::CloseBracket) || pressed(egui::Key::CloseCurlyBracket) {
+            self.nudge_angle(step);
+        }
+        if pressed(egui::Key::Delete) && self.page_has_key() {
+            self.reset_page();
         }
     }
 }
@@ -594,6 +698,7 @@ impl eframe::App for App {
             editor::show(self, ui);
         });
         export_dialog::show(self, ui.ctx());
+        help::show(self, ui.ctx());
     }
 }
 
