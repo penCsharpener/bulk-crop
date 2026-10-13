@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::decode::read_taken;
 use crate::error::CoreError;
+use crate::export::ExportOptions;
 use crate::persist::{Saved, load};
 use crate::scan::list_jpegs;
 
@@ -107,6 +108,8 @@ pub struct Project {
     pub sort: SortBy,
     /// Saved settings whose picture is no longer in the folder. They are kept when saving.
     pub orphans: BTreeMap<String, Adjust>,
+    /// Where and how the pictures are exported.
+    pub export: ExportOptions,
 }
 
 impl Project {
@@ -124,9 +127,9 @@ impl Project {
 
     /// The only place a `Project` is built.
     fn build(dir: &Path, saved: Option<Saved>) -> Result<Project, CoreError> {
-        let (sort, mut keys) = match saved {
-            Some(saved) => (saved.sort, saved.keys),
-            None => (SortBy::Name, BTreeMap::new()),
+        let (sort, mut keys, saved_export) = match saved {
+            Some(saved) => (saved.sort, saved.keys, saved.export),
+            None => (SortBy::Name, BTreeMap::new(), None),
         };
         let entries = list_jpegs(dir)?
             .into_iter()
@@ -140,11 +143,13 @@ impl Project {
                 }
             })
             .collect();
+        let export = saved_export.unwrap_or_else(|| ExportOptions::for_folder(dir));
         let mut project = Project {
             dir: dir.to_path_buf(),
             entries,
             sort: SortBy::Name,
             orphans: keys,
+            export,
         };
         project.sort(sort);
         Ok(project)
@@ -285,6 +290,7 @@ mod tests {
             ],
             sort: SortBy::Name,
             orphans: BTreeMap::new(),
+            export: ExportOptions::default(),
         };
         project.sort(SortBy::Date);
         assert_eq!(names(&project), ["d.jpg", "a.jpg", "c.jpg", "b.jpg"]);
@@ -307,6 +313,7 @@ mod tests {
                 .collect(),
             sort: SortBy::Name,
             orphans: BTreeMap::new(),
+            export: ExportOptions::default(),
         }
     }
 

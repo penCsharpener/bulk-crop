@@ -1,5 +1,7 @@
 //! Turning and cropping: the mapping from the crop frame to the source picture.
 
+use serde::{Deserialize, Serialize};
+
 use crate::model::{Adjust, CropRect};
 
 /// A size in pixels.
@@ -10,7 +12,7 @@ pub struct Size {
 }
 
 /// How the cropped picture is shrunk for output.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Resize {
     None,
     LongEdge(u32),

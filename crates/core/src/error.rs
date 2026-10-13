@@ -12,4 +12,8 @@ pub enum CoreError {
     Decode { path: PathBuf, message: String },
     #[error("cannot parse {}: {message}", path.display())]
     Sidecar { path: PathBuf, message: String },
+    #[error("the output folder is the photo folder: {}", path.display())]
+    OutDirIsSource { path: PathBuf },
+    #[error("cannot start worker threads: {0}")]
+    Threads(String),
 }
