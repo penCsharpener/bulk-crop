@@ -1,7 +1,7 @@
 //! Bottom status bar: the page position, name, full size and crop frame size, any error from
 //! opening a folder, and the outcome of saving.
 
-use pagecrop_core::geometry::{Size, base_size};
+use pagecrop_core::geometry::{Size, base_size, output_size};
 
 use crate::app::{App, Content};
 
@@ -69,7 +69,7 @@ fn full_size_of_selected(app: &App) -> Option<(u32, u32)> {
     }
 }
 
-/// The crop frame's size in source pixels, as shown after the picture's size.
+/// The crop frame's size in source pixels, and the size the export will give it.
 fn frame_text(app: &App, full_size: (u32, u32)) -> String {
     let adjust = app.effective();
     let base = base_size(
@@ -81,5 +81,6 @@ fn frame_text(app: &App, full_size: (u32, u32)) -> String {
     );
     let w = (adjust.crop.w * base.w).round().max(1.0) as u32;
     let h = (adjust.crop.h * base.h).round().max(1.0) as u32;
-    format!(" · frame {w}×{h}")
+    let (out_w, out_h) = output_size(base, adjust.crop, app.export_dialog.resize());
+    format!(" · frame {w}×{h} → {out_w}×{out_h}")
 }
