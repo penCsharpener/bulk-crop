@@ -1,6 +1,7 @@
 //! All image logic for pagecrop: model, geometry, decode, render, tone, export, persistence.
 //! Nothing in this crate may depend on a window or a file dialog.
 
+pub mod crop_edit;
 pub mod decode;
 pub mod error;
 pub mod geometry;
