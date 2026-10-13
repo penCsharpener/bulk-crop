@@ -1,5 +1,5 @@
-//! Bottom status bar: the page position, name, full size and crop frame size, any error from
-//! opening a folder, and the outcome of saving.
+//! Bottom status bar: the page position, name, full size, crop frame size and export size, any
+//! error from opening a folder, and the outcome of saving.
 
 use pagecrop_core::geometry::{Size, base_size, output_size};
 

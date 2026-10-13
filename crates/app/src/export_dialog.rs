@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use pagecrop_core::export::{ExportOptions, Outcome, Progress, plan, run};
 use pagecrop_core::geometry::Resize;
@@ -37,7 +37,7 @@ pub struct Run {
     pub cancelled: bool,
     pub finished: bool,
     pub error: Option<String>,
-    /// File names by page index, to name the pictures in the progress messages.
+    /// File names by page index, to name the pictures that failed.
     names: Vec<String>,
     cancel: Arc<AtomicBool>,
     rx: Receiver<Msg>,
@@ -179,7 +179,18 @@ impl App {
         let Some(run) = self.export_dialog.run.as_mut() else {
             return;
         };
-        while let Ok(msg) = run.rx.try_recv() {
+        loop {
+            let msg = match run.rx.try_recv() {
+                Ok(msg) => msg,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    if !run.finished {
+                        run.error = Some("The export stopped unexpectedly.".to_owned());
+                        run.finished = true;
+                    }
+                    break;
+                }
+            };
             match msg {
                 Msg::Failed(err) => {
                     run.error = Some(err);
@@ -207,21 +218,22 @@ impl App {
     }
 }
 
-/// Draws the export window while it is open.
+/// Draws the export window while it is open. It stays open while an export runs, because the rest
+/// of the window is disabled until then and Cancel is in here.
 pub fn show(app: &mut App, ctx: &egui::Context) {
-    let mut open = app.export_dialog.open;
+    let running = app.export_dialog.is_running();
+    let mut open = app.export_dialog.open || running;
     egui::Window::new("Export")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .show(ctx, |ui| {
-            let running = app.export_dialog.is_running();
             ui.add_enabled_ui(!running, |ui| options(app, ui));
             ui.separator();
             progress(app, ui);
             buttons(app, ui);
         });
-    app.export_dialog.open = open;
+    app.export_dialog.open = open || app.export_dialog.is_running();
 }
 
 fn options(app: &mut App, ui: &mut egui::Ui) {
