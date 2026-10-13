@@ -9,6 +9,7 @@ pub mod geometry;
 pub mod model;
 pub mod render;
 pub mod scan;
+pub mod tone;
 
 /// The version of this crate, taken from `Cargo.toml`.
 pub fn version() -> &'static str {
