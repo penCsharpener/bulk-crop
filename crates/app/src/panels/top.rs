@@ -1,5 +1,7 @@
 //! Top bar with the application name and the open-folder button.
 
+use pagecrop_core::model::SortBy;
+
 use crate::app::App;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -8,6 +10,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ui.heading("pagecrop");
             if ui.button("Open folder…").clicked() {
                 open_with_dialog(app);
+            }
+            ui.separator();
+            let current = app.project.as_ref().map(|p| p.sort);
+            for (label, by) in [("Name", SortBy::Name), ("Date", SortBy::Date)] {
+                if ui.selectable_label(current == Some(by), label).clicked() {
+                    app.set_sort(by);
+                }
             }
         });
     });

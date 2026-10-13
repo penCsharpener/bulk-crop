@@ -103,8 +103,9 @@ fn load_preview(path: &Path) -> Result<(egui::ColorImage, (u32, u32)), CoreError
 }
 
 /// A finished thumbnail. `image` is None when the picture could not be decoded.
+/// The file name identifies the page, because a sort can move the page to another index.
 pub struct Thumb {
-    pub index: usize,
+    pub file_name: String,
     pub generation: u64,
     pub image: Option<egui::ColorImage>,
 }
@@ -133,13 +134,13 @@ impl Thumbnails {
         })
     }
 
-    pub fn request(&self, generation: u64, index: usize, path: PathBuf) {
+    pub fn request(&self, generation: u64, file_name: String, path: PathBuf) {
         let tx = self.replies_tx.clone();
         let ctx = self.ctx.clone();
         self.pool.spawn(move || {
             let image = make_thumbnail(&path);
             let _ = tx.send(Thumb {
-                index,
+                file_name,
                 generation,
                 image,
             });

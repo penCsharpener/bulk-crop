@@ -1,8 +1,9 @@
 //! The application state and the frame that lays out the panels.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use pagecrop_core::model::Project;
+use pagecrop_core::model::{Project, SortBy};
 
 use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
 use crate::{editor, panels};
@@ -13,11 +14,13 @@ pub struct App {
     pub project: Option<Project>,
     /// Index of the page on screen. 0 when the folder is empty.
     pub selected: usize,
-    /// Goes up each time a folder opens. Previews of an older folder are dropped.
+    /// Goes up each time a folder opens. Thumbnails of an older folder are dropped.
     pub generation: u64,
+    /// Like `generation`, and it also goes up on a sort, because that moves pages to new indices.
+    preview_generation: u64,
     /// Why the last folder could not be opened. The previous folder stays open.
     pub error: Option<String>,
-    /// Set by keyboard moves and by opening a folder so the page list scrolls to the selected row.
+    /// Set by keyboard moves, by opening a folder and by a sort so the page list scrolls to the selected row.
     pub reveal_selected: bool,
     loader: Loader,
     thumbnails: Thumbnails,
@@ -54,6 +57,7 @@ impl App {
             project: None,
             selected: 0,
             generation: 0,
+            preview_generation: 0,
             error: None,
             reveal_selected: false,
             loader: Loader::spawn(ctx.clone()),
@@ -72,9 +76,13 @@ impl App {
         match Project::open(dir) {
             Ok(project) => {
                 self.generation += 1;
-                for (index, entry) in project.entries.iter().enumerate() {
-                    self.thumbnails
-                        .request(self.generation, index, entry.path.clone());
+                self.preview_generation += 1;
+                for entry in &project.entries {
+                    self.thumbnails.request(
+                        self.generation,
+                        entry.file_name.clone(),
+                        entry.path.clone(),
+                    );
                 }
                 self.thumbs = vec![None; project.entries.len()];
                 self.project = Some(project);
@@ -139,22 +147,65 @@ impl App {
             if thumb.generation != self.generation {
                 continue;
             }
-            let Some(image) = thumb.image else {
+            let (Some(image), Some(project)) = (thumb.image, self.project.as_ref()) else {
+                continue;
+            };
+            let Some(index) = project
+                .entries
+                .iter()
+                .position(|e| e.file_name == thumb.file_name)
+            else {
                 continue;
             };
             let texture = ctx.load_texture(
-                format!("thumb {}", thumb.index),
+                format!("thumb {}", thumb.file_name),
                 image,
                 egui::TextureOptions::LINEAR,
             );
-            if let Some(slot) = self.thumbs.get_mut(thumb.index) {
+            if let Some(slot) = self.thumbs.get_mut(index) {
                 *slot = Some(texture);
             }
         }
     }
 
+    /// Sorts the folder by name or by date. The selected page stays selected, and the
+    /// thumbnails move with their pages.
+    pub fn set_sort(&mut self, by: SortBy) {
+        let selected_name = self
+            .project
+            .as_ref()
+            .and_then(|p| p.entries.get(self.selected))
+            .map(|e| e.file_name.clone());
+        let Some(project) = self.project.as_mut() else {
+            return;
+        };
+        if project.sort == by {
+            return;
+        }
+        let mut thumbs_by_name: HashMap<String, egui::TextureHandle> = project
+            .entries
+            .iter()
+            .zip(self.thumbs.iter())
+            .filter_map(|(e, t)| t.clone().map(|t| (e.file_name.clone(), t)))
+            .collect();
+        project.sort(by);
+        self.thumbs = project
+            .entries
+            .iter()
+            .map(|e| thumbs_by_name.remove(&e.file_name))
+            .collect();
+        self.selected = selected_name
+            .and_then(|name| project.entries.iter().position(|e| e.file_name == name))
+            .unwrap_or(0);
+        self.reveal_selected = true;
+        // Previews still on their way were asked for by old index, so they are dropped.
+        self.preview_generation += 1;
+        self.preview = None;
+        self.last_requested = None;
+    }
+
     fn is_current(&self, index: usize, generation: u64) -> bool {
-        generation == self.generation && index == self.selected
+        generation == self.preview_generation && index == self.selected
     }
 
     /// Asks the worker for the selected page whenever the folder or the selection has changed.
@@ -162,7 +213,7 @@ impl App {
         let Some(project) = &self.project else {
             return;
         };
-        let key = (self.generation, self.selected);
+        let key = (self.preview_generation, self.selected);
         if self.last_requested == Some(key) {
             return;
         }
@@ -170,7 +221,7 @@ impl App {
         if let Some(entry) = project.entries.get(self.selected) {
             self.loader.request(PreviewRequest {
                 index: self.selected,
-                generation: self.generation,
+                generation: self.preview_generation,
                 path: entry.path.clone(),
             });
         }
