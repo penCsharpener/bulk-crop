@@ -1,0 +1,12 @@
+[package]
+name = "pagecrop"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pagecrop"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.36.2"
+egui = "0.36.2"
