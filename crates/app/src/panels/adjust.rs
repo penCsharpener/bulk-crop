@@ -71,6 +71,7 @@ fn edit_once(app: &mut App, adjust: Adjust) {
 fn view(app: &mut App, ui: &mut egui::Ui) {
     ui.strong("View");
     ui.checkbox(&mut app.show_grid, "Grid");
+    ui.checkbox(&mut app.show_result, "Show result");
 }
 
 fn page(app: &mut App, ui: &mut egui::Ui) {

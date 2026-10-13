@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use image::RgbImage;
 use pagecrop_core::crop_edit::Handle;
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
 
@@ -18,7 +19,7 @@ pub struct App {
     /// Goes up each time a folder opens. Thumbnails of an older folder are dropped.
     pub generation: u64,
     /// Like `generation`, and it also goes up on a sort, because that moves pages to new indices.
-    preview_generation: u64,
+    pub preview_generation: u64,
     /// Why the last folder could not be opened. The previous folder stays open.
     pub error: Option<String>,
     /// Set by keyboard moves, by opening a folder and by a sort so the page list scrolls to the selected row.
@@ -38,6 +39,10 @@ pub struct App {
     pub drag: Option<Drag>,
     /// Whether a grid is drawn over the crop frame.
     pub show_grid: bool,
+    /// Whether the selected page is shown as it will be exported, instead of with its frame.
+    pub show_result: bool,
+    /// The last rendered result view.
+    pub result: Option<ResultView>,
 }
 
 /// A preview of one page.
@@ -49,10 +54,19 @@ pub struct Preview {
 pub enum Content {
     Picture {
         texture: egui::TextureHandle,
+        /// The preview as pixels, for rendering the result view.
+        rgb: RgbImage,
         /// Size of the whole picture before shrinking, in pixels.
         full_size: (u32, u32),
     },
     Failed(String),
+}
+
+/// The rendered result of a page. Kept until the page, its settings or the view size change.
+pub struct ResultView {
+    /// The selected page, the preview generation, its settings and the view's longer side in points.
+    pub key: (usize, u64, Adjust, u32),
+    pub texture: egui::TextureHandle,
 }
 
 /// A drag of one part of the crop frame. `start` is the frame when the drag began and `press` the
@@ -84,6 +98,8 @@ impl App {
             pending_sort: None,
             drag: None,
             show_grid: false,
+            show_result: false,
+            result: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
@@ -132,12 +148,17 @@ impl App {
                     index,
                     generation,
                     image,
+                    rgb,
                     full_size,
                 } if self.is_current(index, generation) => {
                     let texture = ctx.load_texture("preview", image, egui::TextureOptions::LINEAR);
                     self.preview = Some(Preview {
                         index,
-                        content: Content::Picture { texture, full_size },
+                        content: Content::Picture {
+                            texture,
+                            rgb,
+                            full_size,
+                        },
                     });
                 }
                 PreviewReply::Failed {
@@ -347,6 +368,9 @@ impl App {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
+        if ctx.input(result_key_pressed) {
+            self.show_result = !self.show_result;
+        }
         if self.page_count() == 0 {
             return;
         }
@@ -358,6 +382,22 @@ impl App {
             self.reveal_selected = true;
         }
     }
+}
+
+/// Whether P went down this frame on its own. Key repeat and P with a modifier do not count.
+fn result_key_pressed(input: &egui::InputState) -> bool {
+    input.events.iter().any(|event| {
+        matches!(
+            event,
+            egui::Event::Key {
+                key: egui::Key::P,
+                pressed: true,
+                repeat: false,
+                modifiers,
+                ..
+            } if modifiers.is_none()
+        )
+    })
 }
 
 /// The page a navigation key asks for, if one was pressed this frame.
