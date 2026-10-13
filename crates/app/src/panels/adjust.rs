@@ -4,10 +4,13 @@ use pagecrop_core::geometry::quarter_turn;
 use pagecrop_core::model::Adjust;
 
 use crate::app::App;
+use crate::theme;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     egui::Panel::right("adjust")
-        .exact_size(260.0)
+        .resizable(true)
+        .default_size(260.0)
+        .size_range(240.0..=360.0)
         .show(ui, |ui| {
             ui.heading("Adjust");
             ui.separator();
@@ -22,7 +25,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn rotation(app: &mut App, ui: &mut egui::Ui) {
-    ui.strong("Rotation");
+    theme::section(ui, "Rotation");
     let current = app.effective();
     ui.horizontal(|ui| {
         if ui.button("⟲ 90°").clicked() {
@@ -56,7 +59,7 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn tone(app: &mut App, ui: &mut egui::Ui) {
-    ui.strong("Tone");
+    theme::section(ui, "Tone");
     let current = app.effective();
     let mut brightness = current.brightness;
     let slider = ui.add(egui::Slider::new(&mut brightness, -100..=100).text("Brightness"));
@@ -111,13 +114,13 @@ fn track(app: &mut App, response: &egui::Response, adjust: Adjust) {
 }
 
 fn view(app: &mut App, ui: &mut egui::Ui) {
-    ui.strong("View");
+    theme::section(ui, "View");
     ui.checkbox(&mut app.show_grid, "Grid");
     ui.checkbox(&mut app.show_result, "Show result");
 }
 
 fn page(app: &mut App, ui: &mut egui::Ui) {
-    ui.strong("Page");
+    theme::section(ui, "Page");
     ui.label(app.page_label());
     if ui
         .add_enabled(app.page_has_key(), egui::Button::new("Reset page"))

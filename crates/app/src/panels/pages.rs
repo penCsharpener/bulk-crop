@@ -4,20 +4,23 @@ use egui::{Align2, Color32, FontId, Rect, Sense};
 
 use crate::app::App;
 use crate::editor::paint_fitted;
+use crate::theme::ACCENT;
 
 /// Height of one page row, in points.
 const ROW_HEIGHT: f32 = 96.0;
 const THUMB_W: f32 = 120.0;
 const THUMB_H: f32 = 84.0;
-/// Marks pages that have their own settings.
-const ACCENT: Color32 = Color32::from_rgb(64, 156, 255);
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
-    egui::Panel::left("pages").exact_size(220.0).show(ui, |ui| {
-        ui.heading("Pages");
-        ui.separator();
-        page_list(app, ui);
-    });
+    egui::Panel::left("pages")
+        .resizable(true)
+        .default_size(220.0)
+        .size_range(160.0..=360.0)
+        .show(ui, |ui| {
+            ui.heading("Pages");
+            ui.separator();
+            page_list(app, ui);
+        });
 }
 
 fn page_list(app: &mut App, ui: &mut egui::Ui) {
@@ -53,6 +56,9 @@ fn page_row(ui: &mut egui::Ui, app: &App, index: usize, selected: bool) -> bool 
     let painter = ui.painter();
     if selected {
         painter.rect_filled(rect, 4.0, ui.visuals().selection.bg_fill);
+        // The accent bar on the left edge marks the page on screen.
+        let bar = Rect::from_min_size(rect.left_top(), egui::vec2(4.0, rect.height()));
+        painter.rect_filled(bar, 2.0, ACCENT);
     }
     let thumb_box = Rect::from_center_size(
         egui::pos2(rect.center().x, rect.top() + THUMB_H / 2.0),
@@ -65,7 +71,11 @@ fn page_row(ui: &mut egui::Ui, app: &App, index: usize, selected: bool) -> bool 
         }
     }
     if entry.key.is_some() {
-        painter.circle_filled(egui::pos2(rect.left() + 8.0, rect.top() + 8.0), 3.5, ACCENT);
+        painter.circle_filled(
+            egui::pos2(rect.left() + 12.0, rect.top() + 8.0),
+            3.5,
+            ACCENT,
+        );
     }
     painter.text(
         egui::pos2(rect.center().x, rect.top() + THUMB_H),

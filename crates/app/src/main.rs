@@ -6,6 +6,7 @@ mod export_dialog;
 mod help;
 mod loader;
 mod panels;
+mod theme;
 
 use std::path::PathBuf;
 
@@ -15,14 +16,15 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("pagecrop")
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([900.0, 600.0]),
+            .with_min_inner_size([900.0, 600.0])
+            .with_icon(theme::window_icon()),
         ..Default::default()
     };
     eframe::run_native(
         "pagecrop",
         options,
         Box::new(move |cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+            theme::apply(&cc.egui_ctx);
             Ok(Box::new(app::App::new(cc.egui_ctx.clone(), folder)?))
         }),
     )
