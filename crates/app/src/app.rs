@@ -7,6 +7,7 @@ use std::time::Instant;
 use image::RgbImage;
 use pagecrop_core::crop_edit::Handle;
 use pagecrop_core::error::CoreError;
+use pagecrop_core::history::{Edit, History};
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
 use pagecrop_core::persist::{self, SIDECAR_NAME};
 
@@ -56,6 +57,11 @@ pub struct App {
     /// A note about the folder, such as an unreadable settings file that was kept.
     pub notice: Option<String>,
     pub export_dialog: ExportDialog,
+    /// The changes that can be undone and redone.
+    pub history: History,
+    /// The page being changed and its settings before the change, from `begin_edit` until
+    /// `commit_edit`.
+    edit_start: Option<(usize, Option<Adjust>)>,
 }
 
 /// A preview of one page.
@@ -125,6 +131,8 @@ impl App {
             save_error: None,
             notice: None,
             export_dialog: ExportDialog::default(),
+            history: History::default(),
+            edit_start: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
@@ -165,6 +173,8 @@ impl App {
         self.reveal_selected = true;
         self.preview = None;
         self.pending_sort = None;
+        self.history.clear();
+        self.edit_start = None;
         self.error = None;
         self.saved_at = None;
         self.save_error = None;
@@ -312,11 +322,54 @@ impl App {
         }
     }
 
-    /// Starts an edit. The undo history comes in row 0001.12.
-    pub fn begin_edit(&mut self) {}
+    /// Starts an edit: remembers the settings of the selected page as they are before the change.
+    pub fn begin_edit(&mut self) {
+        self.edit_start = self
+            .project
+            .as_ref()
+            .and_then(|p| p.entries.get(self.selected))
+            .map(|entry| (self.selected, entry.key));
+    }
 
-    /// Finishes an edit and saves the settings.
+    /// Whether an edit has begun and not yet been committed, such as while a slider is dragged.
+    pub fn editing(&self) -> bool {
+        self.edit_start.is_some()
+    }
+
+    /// Finishes an edit: records it in the history when the page changed, and saves the settings.
     pub fn commit_edit(&mut self) {
+        if let Some((index, before)) = self.edit_start.take()
+            && let Some(entry) = self.project.as_ref().and_then(|p| p.entries.get(index))
+        {
+            let after = entry.key;
+            self.history.push(Edit {
+                index,
+                before,
+                after,
+            });
+        }
+        self.save_settings();
+    }
+
+    /// Takes back the last change and selects the page it changed.
+    pub fn undo(&mut self) {
+        self.step_history(History::undo);
+    }
+
+    /// Applies the last change that was taken back and selects the page it changed.
+    pub fn redo(&mut self) {
+        self.step_history(History::redo);
+    }
+
+    fn step_history(&mut self, step: fn(&mut History, &mut Project) -> Option<usize>) {
+        let Some(project) = self.project.as_mut() else {
+            return;
+        };
+        let Some(index) = step(&mut self.history, project) else {
+            return;
+        };
+        self.select(index);
+        self.reveal_selected = true;
         self.save_settings();
     }
 
@@ -396,6 +449,9 @@ impl App {
             .and_then(|name| project.entries.iter().position(|e| e.file_name == name))
             .unwrap_or(0);
         self.reveal_selected = true;
+        // The history names pages by index, and a sort moves them, so it is forgotten.
+        self.history.clear();
+        self.edit_start = None;
         // Previews still on their way were asked for by old index, so they are dropped.
         self.preview_generation += 1;
         self.preview = None;
@@ -434,6 +490,14 @@ impl App {
         if ctx.egui_wants_keyboard_input() {
             return;
         }
+        let (undo, redo) = ctx.input(history_keys_pressed);
+        let idle = !self.export_dialog.is_running() && !self.editing();
+        if undo && idle {
+            self.undo();
+        }
+        if redo && idle {
+            self.redo();
+        }
         if ctx.input(result_key_pressed) {
             self.show_result = !self.show_result;
         }
@@ -448,6 +512,16 @@ impl App {
             self.reveal_selected = true;
         }
     }
+}
+
+/// Whether undo and redo were pressed this frame: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo.
+fn history_keys_pressed(input: &egui::InputState) -> (bool, bool) {
+    let command = input.modifiers.command;
+    let shift = input.modifiers.shift;
+    let undo = command && !shift && input.key_pressed(egui::Key::Z);
+    let redo =
+        command && ((shift && input.key_pressed(egui::Key::Z)) || input.key_pressed(egui::Key::Y));
+    (undo, redo)
 }
 
 /// Whether P went down this frame on its own. Key repeat and P with a modifier do not count.
