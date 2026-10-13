@@ -6,6 +6,7 @@ use pagecrop_core::model::{Adjust, CropRect};
 use pagecrop_core::render::render;
 
 use crate::app::{App, Content, Drag, ResultView, ToneView};
+use crate::theme::ACCENT;
 
 /// The smallest frame edge, as a fraction of the base picture.
 const MIN_FRAME: (f32, f32) = (0.02, 0.02);
@@ -14,7 +15,6 @@ const HANDLE_REACH: f32 = 8.0;
 /// The largest zoom: the picture can be magnified up to this many times its fitted size.
 const MAX_ZOOM: f32 = 8.0;
 const HANDLE_SIZE: f32 = 9.0;
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(64, 156, 255);
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     egui::CentralPanel::default().show(ui, |ui| {
