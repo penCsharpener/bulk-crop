@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use pagecrop_core::model::{Adjust, Project, SortBy};
+use pagecrop_core::crop_edit::Handle;
+use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
 
 use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
 use crate::{editor, panels};
@@ -33,6 +34,10 @@ pub struct App {
     last_requested: Option<(u64, usize)>,
     /// A sort waiting for the user to confirm it, because pages have their own settings.
     pending_sort: Option<SortBy>,
+    /// The crop-frame drag in progress, if any.
+    pub drag: Option<Drag>,
+    /// Whether a grid is drawn over the crop frame.
+    pub show_grid: bool,
 }
 
 /// A preview of one page.
@@ -48,6 +53,15 @@ pub enum Content {
         full_size: (u32, u32),
     },
     Failed(String),
+}
+
+/// A drag of one part of the crop frame. `start` is the frame when the drag began and `press` the
+/// pointer position at that moment, both in fractions of the base picture.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Drag {
+    pub handle: Handle,
+    pub start: CropRect,
+    pub press: (f32, f32),
 }
 
 impl App {
@@ -68,6 +82,8 @@ impl App {
             preview: None,
             last_requested: None,
             pending_sort: None,
+            drag: None,
+            show_grid: false,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
