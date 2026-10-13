@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/cli", "crates/testkit"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.pagecrop-core]
+opt-level = 3
+
+[profile.dev.package.pagecrop-testkit]
+opt-level = 3

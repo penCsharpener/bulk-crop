@@ -1,0 +1,8 @@
+[package]
+name = "pagecrop-core"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "pagecrop_core"
+path = "src/lib.rs"
