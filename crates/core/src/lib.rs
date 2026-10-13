@@ -3,6 +3,7 @@
 
 pub mod decode;
 pub mod error;
+pub mod geometry;
 pub mod model;
 pub mod scan;
 
