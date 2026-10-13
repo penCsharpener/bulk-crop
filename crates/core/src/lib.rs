@@ -7,6 +7,7 @@ pub mod encode;
 pub mod error;
 pub mod export;
 pub mod geometry;
+pub mod history;
 pub mod model;
 pub mod persist;
 pub mod render;
