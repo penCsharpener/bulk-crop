@@ -67,6 +67,52 @@ pub fn shrink_to_long_edge(img: &RgbImage, max: u32) -> RgbImage {
     imageops::thumbnail(img, new_w, new_h)
 }
 
+/// Parses EXIF date text such as `2026:01:06 16:53:14` into seconds since the epoch, in UTC.
+pub fn parse_exif_datetime(s: &str) -> Option<i64> {
+    chrono::NaiveDateTime::parse_from_str(s, "%Y:%m:%d %H:%M:%S")
+        .ok()
+        .map(|dt| dt.and_utc().timestamp())
+}
+
+/// The date a picture was taken: EXIF `DateTimeOriginal`, else the file's modification time.
+pub fn read_taken(path: &Path) -> Option<i64> {
+    exif_taken(path).or_else(|| modified_secs(path))
+}
+
+fn exif_taken(path: &Path) -> Option<i64> {
+    let file = std::fs::File::open(path).ok()?;
+    let exif = exif::Reader::new()
+        .read_from_container(&mut BufReader::new(file))
+        .ok()?;
+    let field = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)?;
+    match &field.value {
+        exif::Value::Ascii(parts) => {
+            let text = std::str::from_utf8(parts.first()?).ok()?;
+            parse_exif_datetime(text.trim_end_matches('\0').trim())
+        }
+        _ => None,
+    }
+}
+
+fn modified_secs(path: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let secs = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    i64::try_from(secs).ok()
+}
+
+/// A date in seconds since the epoch as text for display, or `-` when there is none.
+pub fn format_taken(taken: Option<i64>) -> String {
+    taken
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+        .map_or_else(
+            || "-".to_owned(),
+            |dt| dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +163,17 @@ mod tests {
     fn shrink_never_enlarges() {
         let img = RgbImage::new(100, 80);
         assert_eq!(shrink_to_long_edge(&img, 500).dimensions(), (100, 80));
+    }
+
+    #[test]
+    fn parses_exif_datetime() {
+        assert_eq!(parse_exif_datetime("2026:01:06 16:53:14"), Some(1767718394));
+    }
+
+    #[test]
+    fn rejects_garbage_datetime() {
+        assert_eq!(parse_exif_datetime("not a date"), None);
+        assert_eq!(parse_exif_datetime("2026:13:45 00:00:00"), None);
     }
 
     #[test]

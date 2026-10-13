@@ -8,6 +8,7 @@ name = "pagecrop_testkit"
 path = "src/lib.rs"
 
 [dependencies]
+filetime = "0.2.29"
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 
 [dev-dependencies]
