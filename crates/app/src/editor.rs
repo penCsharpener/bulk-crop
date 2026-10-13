@@ -92,12 +92,7 @@ fn toned_texture(
     {
         return tone.texture.clone();
     }
-    let Some(Content::Picture { rgb, .. }) = app
-        .preview
-        .as_ref()
-        .filter(|p| p.index == app.selected)
-        .map(|p| &p.content)
-    else {
+    let Some(Content::Picture { rgb, .. }) = app.selected_content() else {
         return plain.clone();
     };
     let tone_only = Adjust {
@@ -124,12 +119,7 @@ fn show_result(app: &mut App, ui: &egui::Ui, area: egui::Rect) {
     let longest = area.width().max(area.height()).round().max(1.0) as u32;
     let key = (app.selected, app.preview_generation, adjust, longest);
     if app.result.as_ref().is_none_or(|r| r.key != key) {
-        let Some(Content::Picture { rgb, .. }) = app
-            .preview
-            .as_ref()
-            .filter(|p| p.index == app.selected)
-            .map(|p| &p.content)
-        else {
+        let Some(Content::Picture { rgb, .. }) = app.selected_content() else {
             return;
         };
         let out = render(rgb, &adjust, Resize::LongEdge(longest)).to_rgb8();

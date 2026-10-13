@@ -1,5 +1,6 @@
 //! Loads page previews on a worker thread, so the window never waits for a file.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -36,14 +37,14 @@ pub enum PreviewReply {
 
 /// The worker thread and the channels to talk to it.
 pub struct Loader {
-    requests: Sender<PreviewRequest>,
+    requests: Sender<Vec<PreviewRequest>>,
     replies: Receiver<PreviewReply>,
 }
 
 impl Loader {
     /// Starts the worker. It wakes the window through `ctx` when a reply is ready.
     pub fn spawn(ctx: egui::Context) -> Loader {
-        let (request_tx, request_rx) = mpsc::channel();
+        let (request_tx, request_rx): (Sender<Vec<PreviewRequest>>, _) = mpsc::channel();
         let (reply_tx, reply_rx) = mpsc::channel();
         std::thread::spawn(move || work(&request_rx, &reply_tx, &ctx));
         Loader {
@@ -52,9 +53,11 @@ impl Loader {
         }
     }
 
-    pub fn request(&self, request: PreviewRequest) {
+    /// Replaces the wanted previews with `wanted`, in the order they are needed. An empty list
+    /// cancels the ones still waiting.
+    pub fn request(&self, wanted: Vec<PreviewRequest>) {
         // The worker runs until the window closes, so a failed send is not an error.
-        let _ = self.requests.send(request);
+        let _ = self.requests.send(wanted);
     }
 
     /// The next finished preview, if one is waiting.
@@ -63,14 +66,28 @@ impl Loader {
     }
 }
 
-fn work(requests: &Receiver<PreviewRequest>, replies: &Sender<PreviewReply>, ctx: &egui::Context) {
-    while let Ok(mut request) = requests.recv() {
-        // Skip to the newest request that is already waiting.
-        while let Ok(newer) = requests.try_recv() {
-            request = newer;
+/// Decodes the wanted previews one at a time. A newer list replaces what is left of the older one.
+fn work(
+    requests: &Receiver<Vec<PreviewRequest>>,
+    replies: &Sender<PreviewReply>,
+    ctx: &egui::Context,
+) {
+    let mut pending: VecDeque<PreviewRequest> = VecDeque::new();
+    loop {
+        if pending.is_empty() {
+            match requests.recv() {
+                Ok(wanted) => pending = wanted.into(),
+                Err(_) => return,
+            }
         }
+        while let Ok(newer) = requests.try_recv() {
+            pending = newer.into();
+        }
+        let Some(request) = pending.pop_front() else {
+            continue;
+        };
         if replies.send(build_reply(&request)).is_err() {
-            break;
+            return;
         }
         ctx.request_repaint();
     }

@@ -9,7 +9,7 @@ use pagecrop_core::crop_edit::Handle;
 use pagecrop_core::error::CoreError;
 use pagecrop_core::geometry::quarter_turn;
 use pagecrop_core::history::{Edit, History};
-use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
+use pagecrop_core::model::{Adjust, CropRect, Project, SortBy, read_ahead_order};
 use pagecrop_core::persist::{self, SIDECAR_NAME};
 
 use crate::export_dialog::{self, ExportDialog};
@@ -35,8 +35,8 @@ pub struct App {
     /// One thumbnail per page of the open folder; None until it arrives, or for good if the picture
     /// could not be decoded.
     pub thumbs: Vec<Option<egui::TextureHandle>>,
-    /// The last preview to arrive. Shown only while its index is the selected page.
-    pub preview: Option<Preview>,
+    /// The previews in memory: the selected page and the pages read ahead of it.
+    pub previews: PreviewCache,
     /// The (generation, selected) pair a preview was last requested for.
     last_requested: Option<(u64, usize)>,
     /// A sort waiting for the user to confirm it, because pages have their own settings.
@@ -75,10 +75,51 @@ pub struct App {
     nudge_page: Option<usize>,
 }
 
+/// How many previews are kept in memory.
+const CACHE_SIZE: usize = 12;
+
 /// A preview of one page.
 pub struct Preview {
     pub index: usize,
     pub content: Content,
+}
+
+/// The previews in memory, least recently used first.
+#[derive(Default)]
+pub struct PreviewCache {
+    entries: Vec<Preview>,
+}
+
+impl PreviewCache {
+    pub fn get(&self, index: usize) -> Option<&Preview> {
+        self.entries.iter().find(|p| p.index == index)
+    }
+
+    pub fn contains(&self, index: usize) -> bool {
+        self.get(index).is_some()
+    }
+
+    /// Marks page `index` as the most recently used. Does nothing when it is not cached.
+    pub fn use_page(&mut self, index: usize) {
+        if let Some(pos) = self.entries.iter().position(|p| p.index == index) {
+            let preview = self.entries.remove(pos);
+            self.entries.push(preview);
+        }
+    }
+
+    /// Stores a preview as the most recently used one, and drops the least recently used when the
+    /// cache is full.
+    pub fn insert(&mut self, preview: Preview) {
+        self.entries.retain(|p| p.index != preview.index);
+        self.entries.push(preview);
+        if self.entries.len() > CACHE_SIZE {
+            self.entries.remove(0);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
 }
 
 pub enum Content {
@@ -130,7 +171,7 @@ impl App {
             loader: Loader::spawn(ctx.clone()),
             thumbnails: Thumbnails::new(ctx)?,
             thumbs: Vec::new(),
-            preview: None,
+            previews: PreviewCache::default(),
             last_requested: None,
             pending_sort: None,
             drag: None,
@@ -187,7 +228,7 @@ impl App {
         self.project = Some(project);
         self.selected = 0;
         self.reveal_selected = true;
-        self.preview = None;
+        self.previews.clear();
         self.pending_sort = None;
         self.history.clear();
         self.edit_start = None;
@@ -223,7 +264,7 @@ impl App {
         self.nudge_page = None;
     }
 
-    /// Takes the finished previews that belong to the page on screen.
+    /// Takes the finished previews of the open folder into the cache.
     fn take_replies(&mut self, ctx: &egui::Context) {
         while let Some(reply) = self.loader.poll() {
             match reply {
@@ -233,9 +274,9 @@ impl App {
                     image,
                     rgb,
                     full_size,
-                } if self.is_current(index, generation) => {
+                } if generation == self.preview_generation => {
                     let texture = ctx.load_texture("preview", image, egui::TextureOptions::LINEAR);
-                    self.preview = Some(Preview {
+                    self.previews.insert(Preview {
                         index,
                         content: Content::Picture {
                             texture,
@@ -248,8 +289,8 @@ impl App {
                     index,
                     generation,
                     message,
-                } if self.is_current(index, generation) => {
-                    self.preview = Some(Preview {
+                } if generation == self.preview_generation => {
+                    self.previews.insert(Preview {
                         index,
                         content: Content::Failed(message),
                     });
@@ -261,8 +302,7 @@ impl App {
 
     /// What to show for the selected page, once its preview has arrived.
     pub fn selected_content(&self) -> Option<&Content> {
-        let preview = self.preview.as_ref()?;
-        (preview.index == self.selected).then_some(&preview.content)
+        self.previews.get(self.selected).map(|p| &p.content)
     }
 
     /// Stores the thumbnails of the open folder as they arrive.
@@ -483,7 +523,7 @@ impl App {
         self.edit_start = None;
         // Previews still on their way were asked for by old index, so they are dropped.
         self.preview_generation += 1;
-        self.preview = None;
+        self.previews.clear();
         self.last_requested = None;
         self.save_settings();
     }
@@ -537,11 +577,8 @@ impl App {
         self.reveal_selected = true;
     }
 
-    fn is_current(&self, index: usize, generation: u64) -> bool {
-        generation == self.preview_generation && index == self.selected
-    }
-
-    /// Asks the worker for the selected page whenever the folder or the selection has changed.
+    /// Asks the worker for previews whenever the folder or the selection changes: the selected page
+    /// first, then the pages read ahead of it that are not cached yet.
     fn request_preview_if_changed(&mut self) {
         let Some(project) = &self.project else {
             return;
@@ -551,13 +588,21 @@ impl App {
             return;
         }
         self.last_requested = Some(key);
-        if let Some(entry) = project.entries.get(self.selected) {
-            self.loader.request(PreviewRequest {
-                index: self.selected,
-                generation: self.preview_generation,
-                path: entry.path.clone(),
-            });
-        }
+        self.previews.use_page(self.selected);
+        let generation = self.preview_generation;
+        let wanted = read_ahead_order(self.selected, project.entries.len())
+            .into_iter()
+            .filter(|&index| !self.previews.contains(index))
+            .filter_map(|index| {
+                let entry = project.entries.get(index)?;
+                Some(PreviewRequest {
+                    index,
+                    generation,
+                    path: entry.path.clone(),
+                })
+            })
+            .collect();
+        self.loader.request(wanted);
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
