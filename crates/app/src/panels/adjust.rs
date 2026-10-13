@@ -1,5 +1,6 @@
-//! Right panel: rotation, the fine angle, and the settings of the selected page.
+//! Right panel: rotation, the fine angle, the view options and the settings of the selected page.
 
+use pagecrop_core::geometry::quarter_turn;
 use pagecrop_core::model::Adjust;
 
 use crate::app::App;
@@ -12,6 +13,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ui.separator();
             rotation(app, ui);
             ui.separator();
+            view(app, ui);
+            ui.separator();
             page(app, ui);
         });
 }
@@ -21,22 +24,10 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
     let current = app.effective();
     ui.horizontal(|ui| {
         if ui.button("⟲ 90°").clicked() {
-            edit_once(
-                app,
-                Adjust {
-                    quarter_turns: (current.quarter_turns + 3) % 4,
-                    ..current
-                },
-            );
+            edit_once(app, quarter_turn(current, false));
         }
         if ui.button("⟳ 90°").clicked() {
-            edit_once(
-                app,
-                Adjust {
-                    quarter_turns: (current.quarter_turns + 1) % 4,
-                    ..current
-                },
-            );
+            edit_once(app, quarter_turn(current, true));
         }
     });
     let mut angle = current.angle_deg;
@@ -75,6 +66,11 @@ fn edit_once(app: &mut App, adjust: Adjust) {
     app.begin_edit();
     app.apply_edit(adjust);
     app.commit_edit();
+}
+
+fn view(app: &mut App, ui: &mut egui::Ui) {
+    ui.strong("View");
+    ui.checkbox(&mut app.show_grid, "Grid");
 }
 
 fn page(app: &mut App, ui: &mut egui::Ui) {
