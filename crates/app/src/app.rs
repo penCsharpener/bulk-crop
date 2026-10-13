@@ -2,10 +2,13 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use image::RgbImage;
 use pagecrop_core::crop_edit::Handle;
+use pagecrop_core::error::CoreError;
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
+use pagecrop_core::persist::{self, SIDECAR_NAME};
 
 use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
 use crate::{editor, panels};
@@ -45,6 +48,12 @@ pub struct App {
     pub result: Option<ResultView>,
     /// The picture with the tone applied, when the tone is not the default.
     pub tone: Option<ToneView>,
+    /// When the settings were last saved, while the save succeeded.
+    pub saved_at: Option<Instant>,
+    /// Why the last save failed; cleared by the next save that works.
+    pub save_error: Option<String>,
+    /// A note about the folder, such as an unreadable settings file that was kept.
+    pub notice: Option<String>,
 }
 
 /// A preview of one page.
@@ -110,6 +119,9 @@ impl App {
             show_result: false,
             result: None,
             tone: None,
+            saved_at: None,
+            save_error: None,
+            notice: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
@@ -118,26 +130,56 @@ impl App {
     }
 
     pub fn open_folder(&mut self, dir: &Path) {
-        match Project::open(dir) {
+        let (opened, notice) = match Project::open(dir) {
+            Ok(project) => (Ok(project), None),
+            Err(CoreError::Sidecar { path, .. }) => (
+                Project::open_without_settings(dir),
+                Some(keep_unreadable_settings(dir, &path)),
+            ),
+            Err(err) => (Err(err), None),
+        };
+        match opened {
             Ok(project) => {
-                self.generation += 1;
-                self.preview_generation += 1;
-                for entry in &project.entries {
-                    self.thumbnails.request(
-                        self.generation,
-                        entry.file_name.clone(),
-                        entry.path.clone(),
-                    );
-                }
-                self.thumbs = vec![None; project.entries.len()];
-                self.project = Some(project);
-                self.selected = 0;
-                self.reveal_selected = true;
-                self.preview = None;
-                self.pending_sort = None;
-                self.error = None;
+                self.notice = notice;
+                self.install(project);
             }
             Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    /// Makes `project` the open folder: its thumbnails are requested and the selection reset.
+    fn install(&mut self, project: Project) {
+        self.generation += 1;
+        self.preview_generation += 1;
+        for entry in &project.entries {
+            self.thumbnails
+                .request(self.generation, entry.file_name.clone(), entry.path.clone());
+        }
+        self.thumbs = vec![None; project.entries.len()];
+        self.project = Some(project);
+        self.selected = 0;
+        self.reveal_selected = true;
+        self.preview = None;
+        self.pending_sort = None;
+        self.error = None;
+        self.saved_at = None;
+        self.save_error = None;
+    }
+
+    /// Writes the settings of the open folder. The outcome shows in the status bar.
+    fn save_settings(&mut self) {
+        let Some(project) = self.project.as_ref() else {
+            return;
+        };
+        match persist::save(project) {
+            Ok(()) => {
+                self.saved_at = Some(Instant::now());
+                self.save_error = None;
+            }
+            Err(err) => {
+                self.save_error = Some(err.to_string());
+                self.saved_at = None;
+            }
         }
     }
 
@@ -269,8 +311,10 @@ impl App {
     /// Starts an edit. The undo history comes in row 0001.12.
     pub fn begin_edit(&mut self) {}
 
-    /// Finishes an edit. Saving the settings comes in row 0001.10.
-    pub fn commit_edit(&mut self) {}
+    /// Finishes an edit and saves the settings.
+    pub fn commit_edit(&mut self) {
+        self.save_settings();
+    }
 
     /// Sorts now, or asks first when pages have their own settings.
     pub fn request_sort(&mut self, by: SortBy) {
@@ -352,6 +396,7 @@ impl App {
         self.preview_generation += 1;
         self.preview = None;
         self.last_requested = None;
+        self.save_settings();
     }
 
     fn is_current(&self, index: usize, generation: u64) -> bool {
@@ -444,5 +489,14 @@ impl eframe::App for App {
         panels::pages::show(self, ui);
         panels::adjust::show(self, ui);
         editor::show(self, ui);
+    }
+}
+
+/// Copies an unreadable settings file to `pagecrop.json.bak` and says so in a notice.
+fn keep_unreadable_settings(dir: &Path, path: &Path) -> String {
+    let backup = dir.join(format!("{SIDECAR_NAME}.bak"));
+    match std::fs::copy(path, &backup) {
+        Ok(_) => "Settings file was unreadable, kept as pagecrop.json.bak".to_owned(),
+        Err(err) => format!("Settings file was unreadable and could not be kept: {err}"),
     }
 }

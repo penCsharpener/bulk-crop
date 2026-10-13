@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::decode::read_taken;
 use crate::error::CoreError;
-use crate::persist::load;
+use crate::persist::{Saved, load};
 use crate::scan::list_jpegs;
 
 /// A crop frame in fractions of the picture: the centre (`cx`, `cy`) and the size (`w`, `h`).
@@ -110,10 +110,21 @@ pub struct Project {
 }
 
 impl Project {
-    /// Opens a folder of pictures with the settings saved in it. This is the only place a `Project`
-    /// is built.
+    /// Opens a folder of pictures with the settings saved in it.
     pub fn open(dir: &Path) -> Result<Project, CoreError> {
-        let (sort, mut keys) = match load(dir)? {
+        let saved = load(dir)?;
+        Project::build(dir, saved)
+    }
+
+    /// Opens a folder of pictures without its saved settings, for when the settings file cannot be
+    /// read.
+    pub fn open_without_settings(dir: &Path) -> Result<Project, CoreError> {
+        Project::build(dir, None)
+    }
+
+    /// The only place a `Project` is built.
+    fn build(dir: &Path, saved: Option<Saved>) -> Result<Project, CoreError> {
+        let (sort, mut keys) = match saved {
             Some(saved) => (saved.sort, saved.keys),
             None => (SortBy::Name, BTreeMap::new()),
         };

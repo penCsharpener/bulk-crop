@@ -1,5 +1,5 @@
-//! Bottom status bar: the page position, name, full size and crop frame size, and any error from
-//! opening a folder.
+//! Bottom status bar: the page position, name, full size and crop frame size, any error from
+//! opening a folder, and the outcome of saving.
 
 use pagecrop_core::geometry::{Size, base_size};
 
@@ -12,8 +12,31 @@ pub fn show(app: &App, ui: &mut egui::Ui) {
             if let Some(error) = &app.error {
                 ui.colored_label(egui::Color32::RED, error);
             }
+            if let Some(notice) = &app.notice {
+                ui.label(notice);
+            }
+            save_status(app, ui);
         });
     });
+}
+
+/// How long "Saved" stays in the status bar.
+const SAVED_FOR: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// "Saved" for a moment after a save, or the reason the last save failed.
+fn save_status(app: &App, ui: &mut egui::Ui) {
+    if let Some(error) = &app.save_error {
+        ui.colored_label(
+            egui::Color32::from_rgb(255, 165, 0),
+            format!("Could not save: {error}"),
+        );
+    } else if let Some(at) = app.saved_at {
+        let age = at.elapsed();
+        if age < SAVED_FOR {
+            ui.label("Saved");
+            ui.ctx().request_repaint_after(SAVED_FOR - age);
+        }
+    }
 }
 
 fn status_text(app: &App) -> String {
