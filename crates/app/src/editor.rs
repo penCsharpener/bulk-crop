@@ -3,9 +3,9 @@
 use pagecrop_core::crop_edit::{Handle, drag as drag_frame, hit_test};
 use pagecrop_core::geometry::{Resize, Size, base_size, half_extents};
 use pagecrop_core::model::{Adjust, CropRect};
-use pagecrop_core::render::render_rgb;
+use pagecrop_core::render::render;
 
-use crate::app::{App, Content, Drag, ResultView};
+use crate::app::{App, Content, Drag, ResultView, ToneView};
 
 /// The smallest frame edge, as a fraction of the base picture.
 const MIN_FRAME: (f32, f32) = (0.02, 0.02);
@@ -56,13 +56,62 @@ fn canvas(app: &mut App, ui: &mut egui::Ui, texture: &egui::TextureHandle) {
         return;
     }
     let adjust = app.effective();
-    let Some(layout) = Layout::new(texture, adjust, area) else {
+    let texture = toned_texture(app, ui.ctx(), texture, adjust);
+    let Some(layout) = Layout::new(&texture, adjust, area) else {
         return;
     };
     let painter = ui.painter_at(area);
-    paint_picture(&painter, texture, adjust, &layout);
+    paint_picture(&painter, &texture, adjust, &layout);
     paint_frame(&painter, &layout, area, adjust.crop, app.show_grid);
     handle_pointer(app, ui, &response, &layout, adjust);
+}
+
+/// The preview with the tone applied, when the tone is not the default. It is rebuilt only when the
+/// page or the tone values change; otherwise the plain texture is used.
+fn toned_texture(
+    app: &mut App,
+    ctx: &egui::Context,
+    plain: &egui::TextureHandle,
+    adjust: Adjust,
+) -> egui::TextureHandle {
+    if adjust.brightness == 0 && adjust.contrast == 0 && !adjust.grayscale {
+        return plain.clone();
+    }
+    let key = (
+        app.selected,
+        app.preview_generation,
+        adjust.brightness,
+        adjust.contrast,
+        adjust.grayscale,
+    );
+    if let Some(tone) = &app.tone
+        && tone.key == key
+    {
+        return tone.texture.clone();
+    }
+    let Some(Content::Picture { rgb, .. }) = app
+        .preview
+        .as_ref()
+        .filter(|p| p.index == app.selected)
+        .map(|p| &p.content)
+    else {
+        return plain.clone();
+    };
+    let tone_only = Adjust {
+        brightness: adjust.brightness,
+        contrast: adjust.contrast,
+        grayscale: adjust.grayscale,
+        ..Adjust::default()
+    };
+    let toned = render(rgb, &tone_only, Resize::None).to_rgb8();
+    let size = [toned.width() as usize, toned.height() as usize];
+    let color = egui::ColorImage::from_rgb(size, toned.as_raw());
+    let texture = ctx.load_texture("tone", color, egui::TextureOptions::LINEAR);
+    app.tone = Some(ToneView {
+        key,
+        texture: texture.clone(),
+    });
+    texture
 }
 
 /// The selected page rendered as it will be exported, fitted into the area. The render is kept, and
@@ -80,7 +129,7 @@ fn show_result(app: &mut App, ui: &egui::Ui, area: egui::Rect) {
         else {
             return;
         };
-        let out = render_rgb(rgb, &adjust, Resize::LongEdge(longest));
+        let out = render(rgb, &adjust, Resize::LongEdge(longest)).to_rgb8();
         let size = [out.width() as usize, out.height() as usize];
         let color = egui::ColorImage::from_rgb(size, out.as_raw());
         let texture = ui

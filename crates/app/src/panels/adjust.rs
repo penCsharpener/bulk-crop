@@ -1,4 +1,4 @@
-//! Right panel: rotation, the fine angle, the view options and the settings of the selected page.
+//! Right panel: rotation, the fine angle, the view options, the tone and the selected page's settings.
 
 use pagecrop_core::geometry::quarter_turn;
 use pagecrop_core::model::Adjust;
@@ -14,6 +14,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             rotation(app, ui);
             ui.separator();
             view(app, ui);
+            ui.separator();
+            tone(app, ui);
             ui.separator();
             page(app, ui);
         });
@@ -37,19 +39,14 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
             .suffix("°")
             .text("Fine angle"),
     );
-    let typed = slider.changed() && !slider.dragged();
-    if slider.drag_started() || typed {
-        app.begin_edit();
-    }
-    if slider.changed() {
-        app.apply_edit(Adjust {
+    track(
+        app,
+        &slider,
+        Adjust {
             angle_deg: angle,
             ..current
-        });
-    }
-    if slider.drag_stopped() || typed {
-        app.commit_edit();
-    }
+        },
+    );
     if ui.button("0°").clicked() {
         edit_once(
             app,
@@ -58,6 +55,67 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
                 ..current
             },
         );
+    }
+}
+
+fn tone(app: &mut App, ui: &mut egui::Ui) {
+    ui.strong("Tone");
+    let current = app.effective();
+    let mut brightness = current.brightness;
+    let slider = ui.add(egui::Slider::new(&mut brightness, -100..=100).text("Brightness"));
+    track(
+        app,
+        &slider,
+        Adjust {
+            brightness,
+            ..current
+        },
+    );
+    let mut contrast = current.contrast;
+    let slider = ui.add(egui::Slider::new(&mut contrast, -100..=100).text("Contrast"));
+    track(
+        app,
+        &slider,
+        Adjust {
+            contrast,
+            ..current
+        },
+    );
+    let mut grey = current.grayscale;
+    if ui.checkbox(&mut grey, "Greyscale").changed() {
+        edit_once(
+            app,
+            Adjust {
+                grayscale: grey,
+                ..current
+            },
+        );
+    }
+    if ui.button("Reset tone").clicked() {
+        edit_once(
+            app,
+            Adjust {
+                brightness: 0,
+                contrast: 0,
+                grayscale: false,
+                ..current
+            },
+        );
+    }
+}
+
+/// How a control's changes reach the edit helpers. A drag begins with its drag start and commits
+/// with its drag stop; a typed value or a click on a track changes the page at once.
+fn track(app: &mut App, response: &egui::Response, adjust: Adjust) {
+    let at_once = response.changed() && !response.dragged();
+    if response.drag_started() || at_once {
+        app.begin_edit();
+    }
+    if response.changed() {
+        app.apply_edit(adjust);
+    }
+    if response.drag_stopped() || at_once {
+        app.commit_edit();
     }
 }
 

@@ -43,6 +43,8 @@ pub struct App {
     pub show_result: bool,
     /// The last rendered result view.
     pub result: Option<ResultView>,
+    /// The picture with the tone applied, when the tone is not the default.
+    pub tone: Option<ToneView>,
 }
 
 /// A preview of one page.
@@ -60,6 +62,13 @@ pub enum Content {
         full_size: (u32, u32),
     },
     Failed(String),
+}
+
+/// The picture with the tone applied. Kept until the page or the tone values change.
+pub struct ToneView {
+    /// The selected page, its preview generation, brightness, contrast and greyscale.
+    pub key: (usize, u64, i32, i32, bool),
+    pub texture: egui::TextureHandle,
 }
 
 /// The rendered result of a page. Kept until the page, its settings or the view size change.
@@ -100,6 +109,7 @@ impl App {
             show_grid: false,
             show_result: false,
             result: None,
+            tone: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
