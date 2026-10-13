@@ -7,6 +7,7 @@ pub mod encode;
 pub mod error;
 pub mod geometry;
 pub mod model;
+pub mod persist;
 pub mod render;
 pub mod scan;
 pub mod tone;

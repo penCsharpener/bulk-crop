@@ -10,4 +10,6 @@ pub enum CoreError {
     },
     #[error("cannot decode {}: {message}", path.display())]
     Decode { path: PathBuf, message: String },
+    #[error("cannot parse {}: {message}", path.display())]
+    Sidecar { path: PathBuf, message: String },
 }
