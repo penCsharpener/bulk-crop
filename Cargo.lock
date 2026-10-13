@@ -241,6 +241,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.104"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1598,6 +1604,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2344,7 +2352,9 @@ dependencies = [
 name = "pagecrop-cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
+ "pagecrop-testkit",
 ]
 
 [[package]]
@@ -2354,6 +2364,10 @@ version = "0.1.0"
 [[package]]
 name = "pagecrop-testkit"
 version = "0.1.0"
+dependencies = [
+ "image",
+ "tempfile",
+]
 
 [[package]]
 name = "parking"
