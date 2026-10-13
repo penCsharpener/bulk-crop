@@ -9,6 +9,8 @@ use crate::editor::paint_fitted;
 const ROW_HEIGHT: f32 = 96.0;
 const THUMB_W: f32 = 120.0;
 const THUMB_H: f32 = 84.0;
+/// Marks pages that have their own settings.
+const ACCENT: Color32 = Color32::from_rgb(64, 156, 255);
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     egui::Panel::left("pages").exact_size(220.0).show(ui, |ui| {
@@ -61,6 +63,9 @@ fn page_row(ui: &mut egui::Ui, app: &App, index: usize, selected: bool) -> bool 
         None => {
             painter.rect_filled(thumb_box, 2.0, Color32::from_gray(60));
         }
+    }
+    if entry.key.is_some() {
+        painter.circle_filled(egui::pos2(rect.left() + 8.0, rect.top() + 8.0), 3.5, ACCENT);
     }
     painter.text(
         egui::pos2(rect.center().x, rect.top() + THUMB_H),

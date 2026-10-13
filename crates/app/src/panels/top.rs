@@ -15,7 +15,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             let current = app.project.as_ref().map(|p| p.sort);
             for (label, by) in [("Name", SortBy::Name), ("Date", SortBy::Date)] {
                 if ui.selectable_label(current == Some(by), label).clicked() {
-                    app.set_sort(by);
+                    app.request_sort(by);
                 }
             }
         });

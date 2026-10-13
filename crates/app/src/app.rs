@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use pagecrop_core::model::{Project, SortBy};
+use pagecrop_core::model::{Adjust, Project, SortBy};
 
 use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
 use crate::{editor, panels};
@@ -31,6 +31,8 @@ pub struct App {
     pub preview: Option<Preview>,
     /// The (generation, selected) pair a preview was last requested for.
     last_requested: Option<(u64, usize)>,
+    /// A sort waiting for the user to confirm it, because pages have their own settings.
+    pending_sort: Option<SortBy>,
 }
 
 /// A preview of one page.
@@ -65,6 +67,7 @@ impl App {
             thumbs: Vec::new(),
             preview: None,
             last_requested: None,
+            pending_sort: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
@@ -89,6 +92,7 @@ impl App {
                 self.selected = 0;
                 self.reveal_selected = true;
                 self.preview = None;
+                self.pending_sort = None;
                 self.error = None;
             }
             Err(err) => self.error = Some(err.to_string()),
@@ -165,6 +169,105 @@ impl App {
             if let Some(slot) = self.thumbs.get_mut(index) {
                 *slot = Some(texture);
             }
+        }
+    }
+
+    /// The settings that apply to the selected page.
+    pub fn effective(&self) -> Adjust {
+        self.project
+            .as_ref()
+            .map_or_else(Adjust::default, |p| p.effective(self.selected))
+    }
+
+    /// Gives the selected page its own settings. Pages after it follow them.
+    pub fn apply_edit(&mut self, adjust: Adjust) {
+        let selected = self.selected;
+        if let Some(project) = self.project.as_mut() {
+            project.set_key(selected, adjust);
+        }
+    }
+
+    /// Removes the own settings of the selected page.
+    pub fn reset_page(&mut self) {
+        self.begin_edit();
+        let selected = self.selected;
+        if let Some(project) = self.project.as_mut() {
+            project.clear_key(selected);
+        }
+        self.commit_edit();
+    }
+
+    pub fn page_has_key(&self) -> bool {
+        self.project.as_ref().is_some_and(|p| {
+            p.entries
+                .get(self.selected)
+                .is_some_and(|e| e.key.is_some())
+        })
+    }
+
+    /// What the Page section says about the selected page.
+    pub fn page_label(&self) -> String {
+        let Some(project) = &self.project else {
+            return String::new();
+        };
+        if self.page_has_key() {
+            return "Own settings".to_owned();
+        }
+        match project.key_index(self.selected) {
+            Some(k) => format!("Follows page {}", k + 1),
+            None => "Default settings".to_owned(),
+        }
+    }
+
+    /// Starts an edit. The undo history comes in row 0001.12.
+    pub fn begin_edit(&mut self) {}
+
+    /// Finishes an edit. Saving the settings comes in row 0001.10.
+    pub fn commit_edit(&mut self) {}
+
+    /// Sorts now, or asks first when pages have their own settings.
+    pub fn request_sort(&mut self, by: SortBy) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        if project.sort == by {
+            return;
+        }
+        if project.entries.iter().any(|e| e.key.is_some()) {
+            self.pending_sort = Some(by);
+        } else {
+            self.set_sort(by);
+        }
+    }
+
+    /// The question shown before a sort that would change which pages follow which.
+    fn confirm_sort(&mut self, ctx: &egui::Context) {
+        let Some(by) = self.pending_sort else {
+            return;
+        };
+        let mut answer = None;
+        egui::Window::new("Sort order")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("Sort order decides which pages follow which. Switch anyway?");
+                ui.horizontal(|ui| {
+                    if ui.button("Switch").clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+        match answer {
+            Some(true) => {
+                self.pending_sort = None;
+                self.set_sort(by);
+            }
+            Some(false) => self.pending_sort = None,
+            None => {}
         }
     }
 
@@ -269,10 +372,11 @@ impl eframe::App for App {
         self.take_replies(ui.ctx());
         self.take_thumbs(ui.ctx());
         self.request_preview_if_changed();
+        self.confirm_sort(ui.ctx());
         panels::top::show(self, ui);
         panels::status::show(self, ui);
         panels::pages::show(self, ui);
-        panels::adjust::show(ui);
+        panels::adjust::show(self, ui);
         editor::show(self, ui);
     }
 }
