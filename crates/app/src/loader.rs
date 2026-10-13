@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 
+use image::RgbImage;
 use pagecrop_core::decode::{load_oriented, shrink_to_long_edge};
 use pagecrop_core::error::CoreError;
 
@@ -22,6 +23,8 @@ pub enum PreviewReply {
         index: usize,
         generation: u64,
         image: egui::ColorImage,
+        /// The same preview as pixels, for rendering the result view.
+        rgb: RgbImage,
         full_size: (u32, u32),
     },
     Failed {
@@ -76,10 +79,11 @@ fn work(requests: &Receiver<PreviewRequest>, replies: &Sender<PreviewReply>, ctx
 fn build_reply(request: &PreviewRequest) -> PreviewReply {
     let (index, generation) = (request.index, request.generation);
     match load_preview(&request.path) {
-        Ok((image, full_size)) => PreviewReply::Loaded {
+        Ok((image, rgb, full_size)) => PreviewReply::Loaded {
             index,
             generation,
             image,
+            rgb,
             full_size,
         },
         Err(err) => PreviewReply::Failed {
@@ -91,15 +95,13 @@ fn build_reply(request: &PreviewRequest) -> PreviewReply {
 }
 
 /// The preview picture, ready to upload, and the size of the whole picture before shrinking.
-fn load_preview(path: &Path) -> Result<(egui::ColorImage, (u32, u32)), CoreError> {
+fn load_preview(path: &Path) -> Result<(egui::ColorImage, RgbImage, (u32, u32)), CoreError> {
     let full = load_oriented(path)?;
     let full_size = full.dimensions();
     let preview = shrink_to_long_edge(&full, PREVIEW_LONG_EDGE);
     let size = [preview.width() as usize, preview.height() as usize];
-    Ok((
-        egui::ColorImage::from_rgb(size, preview.as_raw()),
-        full_size,
-    ))
+    let color = egui::ColorImage::from_rgb(size, preview.as_raw());
+    Ok((color, preview, full_size))
 }
 
 /// A finished thumbnail. `image` is None when the picture could not be decoded.

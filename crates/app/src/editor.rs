@@ -1,10 +1,11 @@
 //! Central area: the selected page turned by its settings, with its crop frame on top.
 
 use pagecrop_core::crop_edit::{Handle, drag as drag_frame, hit_test};
-use pagecrop_core::geometry::{Size, base_size, half_extents};
+use pagecrop_core::geometry::{Resize, Size, base_size, half_extents};
 use pagecrop_core::model::{Adjust, CropRect};
+use pagecrop_core::render::render_rgb;
 
-use crate::app::{App, Content, Drag};
+use crate::app::{App, Content, Drag, ResultView};
 
 /// The smallest frame edge, as a fraction of the base picture.
 const MIN_FRAME: (f32, f32) = (0.02, 0.02);
@@ -50,6 +51,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 fn canvas(app: &mut App, ui: &mut egui::Ui, texture: &egui::TextureHandle) {
     let (area, response) =
         ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+    if app.show_result {
+        show_result(app, ui, area);
+        return;
+    }
     let adjust = app.effective();
     let Some(layout) = Layout::new(texture, adjust, area) else {
         return;
@@ -58,6 +63,38 @@ fn canvas(app: &mut App, ui: &mut egui::Ui, texture: &egui::TextureHandle) {
     paint_picture(&painter, texture, adjust, &layout);
     paint_frame(&painter, &layout, area, adjust.crop, app.show_grid);
     handle_pointer(app, ui, &response, &layout, adjust);
+}
+
+/// The selected page rendered as it will be exported, fitted into the area. The render is kept, and
+/// redone only when the page, its settings or the view's size change.
+fn show_result(app: &mut App, ui: &egui::Ui, area: egui::Rect) {
+    let adjust = app.effective();
+    let longest = area.width().max(area.height()).round().max(1.0) as u32;
+    let key = (app.selected, app.preview_generation, adjust, longest);
+    if app.result.as_ref().is_none_or(|r| r.key != key) {
+        let Some(Content::Picture { rgb, .. }) = app
+            .preview
+            .as_ref()
+            .filter(|p| p.index == app.selected)
+            .map(|p| &p.content)
+        else {
+            return;
+        };
+        let out = render_rgb(rgb, &adjust, Resize::LongEdge(longest));
+        let size = [out.width() as usize, out.height() as usize];
+        let color = egui::ColorImage::from_rgb(size, out.as_raw());
+        let texture = ui
+            .ctx()
+            .load_texture("result", color, egui::TextureOptions::LINEAR);
+        app.result = Some(ResultView { key, texture });
+    }
+    if let Some(result) = &app.result {
+        paint_fitted(
+            ui.painter(),
+            &result.texture,
+            area.shrink2(area.size() * 0.04),
+        );
+    }
 }
 
 /// Where the picture sits on screen, and how frame fractions map to screen points.
