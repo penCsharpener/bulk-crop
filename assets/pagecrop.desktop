@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=pagecrop
+GenericName=Book page cropper
+Comment=Crop, straighten and shrink photos of book pages in bulk
+Exec=pagecrop %f
+Icon=pagecrop
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=book;scan;crop;photo;
