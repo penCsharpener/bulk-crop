@@ -29,7 +29,8 @@ enum SortArg {
 enum Command {
     /// Print the size of a picture after its EXIF orientation is applied, and the orientation.
     Info { file: PathBuf },
-    /// List the pictures in a folder, one per line with its date, then the count.
+    /// List the pictures in a folder, one per line with its date, then the count. A * in front of
+    /// a name marks a page that has its own settings in pagecrop.json.
     Scan {
         dir: PathBuf,
         #[arg(long, value_enum, default_value_t = SortArg::Name)]
@@ -173,7 +174,8 @@ fn main() -> anyhow::Result<()> {
                 SortArg::Date => SortBy::Date,
             });
             for entry in &project.entries {
-                println!("{}  {}", format_taken(entry.taken), entry.file_name);
+                let mark = if entry.key.is_some() { "*" } else { " " };
+                println!("{}  {mark}{}", format_taken(entry.taken), entry.file_name);
             }
             println!("{} images", project.entries.len());
         }

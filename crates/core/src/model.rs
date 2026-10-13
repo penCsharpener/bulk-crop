@@ -1,16 +1,21 @@
 //! The folder being edited: its pictures and the settings that flow from page to page.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use crate::decode::read_taken;
 use crate::error::CoreError;
+use crate::persist::load;
 use crate::scan::list_jpegs;
 
 /// A crop frame in fractions of the picture: the centre (`cx`, `cy`) and the size (`w`, `h`).
 /// The default is the whole picture.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CropRect {
     pub cx: f32,
     pub cy: f32,
@@ -30,7 +35,8 @@ impl Default for CropRect {
 }
 
 /// Everything one page can change. The default changes nothing.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Adjust {
     /// Quarter turns clockwise, 0 to 3.
     pub quarter_turns: u8,
@@ -85,8 +91,10 @@ pub struct ImageEntry {
     pub key: Option<Adjust>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SortBy {
+    #[default]
     Name,
     Date,
 }
@@ -97,25 +105,38 @@ pub struct Project {
     /// Pictures in display order.
     pub entries: Vec<ImageEntry>,
     pub sort: SortBy,
+    /// Saved settings whose picture is no longer in the folder. They are kept when saving.
+    pub orphans: BTreeMap<String, Adjust>,
 }
 
 impl Project {
-    /// Opens a folder of pictures, sorted by name. This is the only place a `Project` is built.
+    /// Opens a folder of pictures with the settings saved in it. This is the only place a `Project`
+    /// is built.
     pub fn open(dir: &Path) -> Result<Project, CoreError> {
+        let (sort, mut keys) = match load(dir)? {
+            Some(saved) => (saved.sort, saved.keys),
+            None => (SortBy::Name, BTreeMap::new()),
+        };
         let entries = list_jpegs(dir)?
             .into_iter()
-            .map(|path| ImageEntry {
-                file_name: file_name_of(&path),
-                taken: read_taken(&path),
-                key: None,
-                path,
+            .map(|path| {
+                let file_name = file_name_of(&path);
+                ImageEntry {
+                    key: keys.remove(&file_name),
+                    taken: read_taken(&path),
+                    file_name,
+                    path,
+                }
             })
             .collect();
-        Ok(Project {
+        let mut project = Project {
             dir: dir.to_path_buf(),
             entries,
             sort: SortBy::Name,
-        })
+            orphans: keys,
+        };
+        project.sort(sort);
+        Ok(project)
     }
 
     /// Puts the pictures in name order or in date order. Pictures without a date go last in
@@ -252,6 +273,7 @@ mod tests {
                 entry("d.jpg", Some(1)),
             ],
             sort: SortBy::Name,
+            orphans: BTreeMap::new(),
         };
         project.sort(SortBy::Date);
         assert_eq!(names(&project), ["d.jpg", "a.jpg", "c.jpg", "b.jpg"]);
@@ -273,6 +295,7 @@ mod tests {
                 })
                 .collect(),
             sort: SortBy::Name,
+            orphans: BTreeMap::new(),
         }
     }
 
