@@ -8,4 +8,6 @@ pub enum CoreError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("cannot decode {}: {message}", path.display())]
+    Decode { path: PathBuf, message: String },
 }

@@ -8,6 +8,8 @@ name = "pagecrop_core"
 path = "src/lib.rs"
 
 [dependencies]
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
+kamadak-exif = "0.6.1"
 natord = "1.0.9"
 thiserror = "2.0.21"
 

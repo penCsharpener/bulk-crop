@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use pagecrop_core::decode::{load_oriented, read_orientation};
 use pagecrop_core::model::Project;
 
 /// Command-line front end for pagecrop. Commands are added as the core functions they call exist.
@@ -16,6 +17,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Print the size of a picture after its EXIF orientation is applied, and the orientation.
+    Info { file: PathBuf },
     /// List the pictures in a folder, one name per line, then the count.
     Scan { dir: PathBuf },
     /// Write a synthetic book of tilted pages into a folder, for testing.
@@ -36,6 +39,12 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
+        Command::Info { file } => {
+            let img =
+                load_oriented(&file).with_context(|| format!("reading {}", file.display()))?;
+            let (w, h) = img.dimensions();
+            println!("{w}x{h} orientation={}", read_orientation(&file));
+        }
         Command::Scan { dir } => {
             let project =
                 Project::open(&dir).with_context(|| format!("scanning {}", dir.display()))?;
