@@ -1,0 +1,11 @@
+[package]
+name = "pagecrop-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pagecrop-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }

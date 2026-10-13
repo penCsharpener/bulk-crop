@@ -1,0 +1,8 @@
+[package]
+name = "pagecrop-testkit"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "pagecrop_testkit"
+path = "src/lib.rs"
