@@ -1,11 +1,15 @@
 //! Thin terminal commands that call the library crates, for testing without a window.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
+use image::DynamicImage;
 use pagecrop_core::decode::{format_taken, load_oriented, read_orientation};
-use pagecrop_core::model::{Project, SortBy};
+use pagecrop_core::encode::write_jpeg;
+use pagecrop_core::geometry::Resize;
+use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
+use pagecrop_core::render::render_rgb;
 
 /// Command-line front end for pagecrop. Commands are added as the core functions they call exist.
 #[derive(Parser)]
@@ -32,6 +36,31 @@ enum Command {
         #[arg(long, value_enum, default_value_t = SortArg::Name)]
         sort: SortArg,
     },
+    /// Turn, crop and shrink one picture, and write it as a JPEG.
+    Render {
+        file: PathBuf,
+        /// JPEG file to write; the original is never overwritten.
+        #[arg(long)]
+        out: PathBuf,
+        /// Quarter turns clockwise, 0 to 3.
+        #[arg(long, default_value_t = 0)]
+        turns: u8,
+        /// Fine angle in degrees; positive turns clockwise.
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        angle: f32,
+        /// Frame as cx,cy,w,h in fractions of the picture.
+        #[arg(long, default_value = "0,0,1,1", value_parser = parse_crop, allow_hyphen_values = true)]
+        crop: CropRect,
+        /// Shrink so the longer side is this many pixels at most.
+        #[arg(long, conflicts_with = "percent")]
+        long_edge: Option<u32>,
+        /// Shrink to this percentage of the cropped size.
+        #[arg(long, conflicts_with = "long_edge")]
+        percent: Option<f32>,
+        /// JPEG quality, 1 to 100.
+        #[arg(long, default_value_t = 90)]
+        quality: u8,
+    },
     /// Write a synthetic book of tilted pages into a folder, for testing.
     GenFixtures {
         /// Folder to write into; created if missing.
@@ -51,8 +80,72 @@ enum Command {
     },
 }
 
+/// Reads a crop frame written as `cx,cy,w,h`.
+fn parse_crop(text: &str) -> Result<CropRect, String> {
+    let values = text
+        .split(',')
+        .map(|v| match v.trim().parse::<f32>() {
+            Ok(n) if n.is_finite() => Ok(n),
+            Ok(_) => Err(format!("{} is not a finite number", v.trim())),
+            Err(err) => Err(err.to_string()),
+        })
+        .collect::<Result<Vec<f32>, String>>()?;
+    match values.as_slice() {
+        [cx, cy, w, h] => Ok(CropRect {
+            cx: *cx,
+            cy: *cy,
+            w: *w,
+            h: *h,
+        }),
+        _ => Err("expected four numbers: cx,cy,w,h".to_owned()),
+    }
+}
+
+/// Whether two paths name the same file, so a render never overwrites its own input.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
+        Command::Render {
+            file,
+            out,
+            turns,
+            angle,
+            crop,
+            long_edge,
+            percent,
+            quality,
+        } => {
+            anyhow::ensure!(
+                !same_file(&file, &out),
+                "--out must not be the input file {}",
+                file.display()
+            );
+            let src =
+                load_oriented(&file).with_context(|| format!("reading {}", file.display()))?;
+            let adjust = Adjust {
+                quarter_turns: turns,
+                angle_deg: angle,
+                crop,
+                ..Adjust::default()
+            }
+            .normalized();
+            let resize = match (long_edge, percent) {
+                (Some(n), _) => Resize::LongEdge(n),
+                (None, Some(p)) => Resize::Percent(p),
+                (None, None) => Resize::None,
+            };
+            let img = render_rgb(&src, &adjust, resize);
+            let (w, h) = img.dimensions();
+            write_jpeg(&out, &DynamicImage::ImageRgb8(img), quality)
+                .with_context(|| format!("writing {}", out.display()))?;
+            println!("wrote {w}x{h} to {}", out.display());
+        }
         Command::Info { file } => {
             let img =
                 load_oriented(&file).with_context(|| format!("reading {}", file.display()))?;
