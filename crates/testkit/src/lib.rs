@@ -1,1 +1,108 @@
 //! Synthetic book pages for tests and manual runs.
+
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+
+use image::{Rgb, RgbImage};
+
+const TABLE: [u8; 3] = [40, 40, 40];
+const PAGE: [u8; 3] = [245, 245, 240];
+const INK: [u8; 3] = [30, 30, 30];
+
+/// One page on a dark table, turned clockwise by `angle_deg` around the centre of the picture.
+/// Each page has `index + 1` dark squares in a band near its top, so pages can be told apart.
+pub fn page_image(w: u32, h: u32, index: u32, angle_deg: f32) -> RgbImage {
+    let (wf, hf) = (w as f32, h as f32);
+    let (cx, cy) = (wf / 2.0, hf / 2.0);
+    let (page_w, page_h) = (0.70 * wf, 0.80 * hf);
+    let (sin, cos) = angle_deg.to_radians().sin_cos();
+    RgbImage::from_fn(w, h, |x, y| {
+        let dx = x as f32 + 0.5 - cx;
+        let dy = y as f32 + 0.5 - cy;
+        // Turn the pixel back by -angle to get page-local coordinates.
+        let lx = dx * cos + dy * sin;
+        let ly = -dx * sin + dy * cos;
+        let u = lx / page_w + 0.5;
+        let v = ly / page_h + 0.5;
+        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+            return Rgb(TABLE);
+        }
+        if is_text_line(u, v) || is_marker(u, v, index) {
+            Rgb(INK)
+        } else {
+            Rgb(PAGE)
+        }
+    })
+}
+
+fn is_text_line(u: f32, v: f32) -> bool {
+    (0.1..0.9).contains(&u) && (0.15..0.9).contains(&v) && ((v * 40.0) as u32) % 2 == 1
+}
+
+fn is_marker(u: f32, v: f32, index: u32) -> bool {
+    (0.04..0.09).contains(&v)
+        && (0..=index).any(|k| {
+            let start = 0.1 + 0.05 * k as f32;
+            (start..start + 0.03).contains(&u)
+        })
+}
+
+/// Writes `count` pages as `page_001.jpg`, `page_002.jpg`, ... at quality 90 into `dir`,
+/// creating `dir` if needed. Page `i` (counted from 0) is tilted by `i * drift_deg`.
+pub fn write_book(
+    dir: &Path,
+    count: u32,
+    w: u32,
+    h: u32,
+    drift_deg: f32,
+) -> std::io::Result<Vec<PathBuf>> {
+    std::fs::create_dir_all(dir).map_err(|e| with_path(e, dir))?;
+    let mut paths = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let path = dir.join(format!("page_{:03}.jpg", i + 1));
+        let img = page_image(w, h, i, i as f32 * drift_deg);
+        write_jpeg(&img, &path).map_err(|e| with_path(e, &path))?;
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
+fn write_jpeg(img: &RgbImage, path: &Path) -> std::io::Result<()> {
+    let mut out = BufWriter::new(std::fs::File::create(path)?);
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
+    img.write_with_encoder(encoder)
+        .map_err(std::io::Error::other)?;
+    out.flush()
+}
+
+/// Keeps the error kind and names the path in the message.
+fn with_path(e: std::io::Error, path: &Path) -> std::io::Error {
+    std::io::Error::new(e.kind(), format!("{}: {e}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_centre_is_page_colour() {
+        let img = page_image(800, 600, 0, 0.0);
+        assert_eq!(img.get_pixel(400, 300).0, [245, 245, 240]);
+    }
+
+    #[test]
+    fn corner_is_background() {
+        let img = page_image(800, 600, 0, 0.0);
+        assert_eq!(img.get_pixel(0, 0).0, [40, 40, 40]);
+    }
+
+    #[test]
+    fn write_book_creates_count_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = write_book(dir.path(), 3, 80, 60, 0.0).unwrap();
+        assert_eq!(paths.len(), 3);
+        for name in ["page_001.jpg", "page_002.jpg", "page_003.jpg"] {
+            assert!(dir.path().join(name).is_file(), "missing {name}");
+        }
+    }
+}
