@@ -11,6 +11,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             if ui.button("Open folder…").clicked() {
                 open_with_dialog(app);
             }
+            if ui.button("Export…").clicked() {
+                app.export_dialog.open = true;
+            }
             ui.separator();
             let current = app.project.as_ref().map(|p| p.sort);
             for (label, by) in [("Name", SortBy::Name), ("Date", SortBy::Date)] {

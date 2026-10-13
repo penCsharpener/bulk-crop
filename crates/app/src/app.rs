@@ -10,6 +10,7 @@ use pagecrop_core::error::CoreError;
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
 use pagecrop_core::persist::{self, SIDECAR_NAME};
 
+use crate::export_dialog::{self, ExportDialog};
 use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
 use crate::{editor, panels};
 
@@ -54,6 +55,7 @@ pub struct App {
     pub save_error: Option<String>,
     /// A note about the folder, such as an unreadable settings file that was kept.
     pub notice: Option<String>,
+    pub export_dialog: ExportDialog,
 }
 
 /// A preview of one page.
@@ -122,6 +124,7 @@ impl App {
             saved_at: None,
             save_error: None,
             notice: None,
+            export_dialog: ExportDialog::default(),
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
@@ -149,6 +152,7 @@ impl App {
 
     /// Makes `project` the open folder: its thumbnails are requested and the selection reset.
     fn install(&mut self, project: Project) {
+        self.export_dialog.load_from(&project.export);
         self.generation += 1;
         self.preview_generation += 1;
         for entry in &project.entries {
@@ -167,7 +171,7 @@ impl App {
     }
 
     /// Writes the settings of the open folder. The outcome shows in the status bar.
-    fn save_settings(&mut self) {
+    pub(crate) fn save_settings(&mut self) {
         let Some(project) = self.project.as_ref() else {
             return;
         };
@@ -423,6 +427,13 @@ impl App {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
+        if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::E)) {
+            self.export_dialog.open = !self.export_dialog.open;
+        }
+        // Letters and arrows typed into a text field belong to the field, not to the shortcuts.
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
         if ctx.input(result_key_pressed) {
             self.show_result = !self.show_result;
         }
@@ -484,11 +495,16 @@ impl eframe::App for App {
         self.take_thumbs(ui.ctx());
         self.request_preview_if_changed();
         self.confirm_sort(ui.ctx());
-        panels::top::show(self, ui);
-        panels::status::show(self, ui);
-        panels::pages::show(self, ui);
-        panels::adjust::show(self, ui);
-        editor::show(self, ui);
+        self.take_export_messages();
+        let running = self.export_dialog.is_running();
+        ui.add_enabled_ui(!running, |ui| {
+            panels::top::show(self, ui);
+            panels::status::show(self, ui);
+            panels::pages::show(self, ui);
+            panels::adjust::show(self, ui);
+            editor::show(self, ui);
+        });
+        export_dialog::show(self, ui.ctx());
     }
 }
 
