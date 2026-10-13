@@ -8,6 +8,8 @@ use pagecrop_core::error::CoreError;
 
 /// Longest side of a preview, in pixels.
 const PREVIEW_LONG_EDGE: u32 = 1600;
+/// Longest side of a thumbnail, in pixels.
+const THUMB_LONG_EDGE: u32 = 160;
 
 pub struct PreviewRequest {
     pub index: usize,
@@ -98,4 +100,62 @@ fn load_preview(path: &Path) -> Result<(egui::ColorImage, (u32, u32)), CoreError
         egui::ColorImage::from_rgb(size, preview.as_raw()),
         full_size,
     ))
+}
+
+/// A finished thumbnail. `image` is None when the picture could not be decoded.
+pub struct Thumb {
+    pub index: usize,
+    pub generation: u64,
+    pub image: Option<egui::ColorImage>,
+}
+
+/// Makes thumbnails on a pool of its own, so that they never hold up the preview.
+pub struct Thumbnails {
+    pool: rayon::ThreadPool,
+    ctx: egui::Context,
+    replies_tx: Sender<Thumb>,
+    replies: Receiver<Thumb>,
+}
+
+impl Thumbnails {
+    /// One thread per core but one, and at least one.
+    pub fn new(ctx: egui::Context) -> Result<Thumbnails, rayon::ThreadPoolBuildError> {
+        let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(cores.saturating_sub(1).max(1))
+            .build()?;
+        let (replies_tx, replies) = mpsc::channel();
+        Ok(Thumbnails {
+            pool,
+            ctx,
+            replies_tx,
+            replies,
+        })
+    }
+
+    pub fn request(&self, generation: u64, index: usize, path: PathBuf) {
+        let tx = self.replies_tx.clone();
+        let ctx = self.ctx.clone();
+        self.pool.spawn(move || {
+            let image = make_thumbnail(&path);
+            let _ = tx.send(Thumb {
+                index,
+                generation,
+                image,
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    /// The next finished thumbnail, if one is waiting.
+    pub fn poll(&self) -> Option<Thumb> {
+        self.replies.try_recv().ok()
+    }
+}
+
+fn make_thumbnail(path: &Path) -> Option<egui::ColorImage> {
+    let full = load_oriented(path).ok()?;
+    let thumb = shrink_to_long_edge(&full, THUMB_LONG_EDGE);
+    let size = [thumb.width() as usize, thumb.height() as usize];
+    Some(egui::ColorImage::from_rgb(size, thumb.as_raw()))
 }

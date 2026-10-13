@@ -11,4 +11,5 @@ path = "src/main.rs"
 eframe = "0.36.2"
 egui = "0.36.2"
 pagecrop-core = { version = "0.1.0", path = "../core" }
+rayon = "1.12.0"
 rfd = "0.17.2"

@@ -21,7 +21,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            Ok(Box::new(app::App::new(cc.egui_ctx.clone(), folder)))
+            Ok(Box::new(app::App::new(cc.egui_ctx.clone(), folder)?))
         }),
     )
 }

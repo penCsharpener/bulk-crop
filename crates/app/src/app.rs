@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use pagecrop_core::model::Project;
 
-use crate::loader::{Loader, PreviewReply, PreviewRequest};
+use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
 use crate::{editor, panels};
 
 /// All state of the window.
@@ -20,6 +20,10 @@ pub struct App {
     /// Set by keyboard moves and by opening a folder so the page list scrolls to the selected row.
     pub reveal_selected: bool,
     loader: Loader,
+    thumbnails: Thumbnails,
+    /// One thumbnail per page of the open folder; None until it arrives, or for good if the picture
+    /// could not be decoded.
+    pub thumbs: Vec<Option<egui::TextureHandle>>,
     /// The last preview to arrive. Shown only while its index is the selected page.
     pub preview: Option<Preview>,
     /// The (generation, selected) pair a preview was last requested for.
@@ -42,30 +46,40 @@ pub enum Content {
 }
 
 impl App {
-    pub fn new(ctx: egui::Context, folder: Option<PathBuf>) -> App {
+    pub fn new(
+        ctx: egui::Context,
+        folder: Option<PathBuf>,
+    ) -> Result<App, rayon::ThreadPoolBuildError> {
         let mut app = App {
             project: None,
             selected: 0,
             generation: 0,
             error: None,
             reveal_selected: false,
-            loader: Loader::spawn(ctx),
+            loader: Loader::spawn(ctx.clone()),
+            thumbnails: Thumbnails::new(ctx)?,
+            thumbs: Vec::new(),
             preview: None,
             last_requested: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
         }
-        app
+        Ok(app)
     }
 
     pub fn open_folder(&mut self, dir: &Path) {
         match Project::open(dir) {
             Ok(project) => {
+                self.generation += 1;
+                for (index, entry) in project.entries.iter().enumerate() {
+                    self.thumbnails
+                        .request(self.generation, index, entry.path.clone());
+                }
+                self.thumbs = vec![None; project.entries.len()];
                 self.project = Some(project);
                 self.selected = 0;
                 self.reveal_selected = true;
-                self.generation += 1;
                 self.preview = None;
                 self.error = None;
             }
@@ -117,6 +131,26 @@ impl App {
     pub fn selected_content(&self) -> Option<&Content> {
         let preview = self.preview.as_ref()?;
         (preview.index == self.selected).then_some(&preview.content)
+    }
+
+    /// Stores the thumbnails of the open folder as they arrive.
+    fn take_thumbs(&mut self, ctx: &egui::Context) {
+        while let Some(thumb) = self.thumbnails.poll() {
+            if thumb.generation != self.generation {
+                continue;
+            }
+            let Some(image) = thumb.image else {
+                continue;
+            };
+            let texture = ctx.load_texture(
+                format!("thumb {}", thumb.index),
+                image,
+                egui::TextureOptions::LINEAR,
+            );
+            if let Some(slot) = self.thumbs.get_mut(thumb.index) {
+                *slot = Some(texture);
+            }
+        }
     }
 
     fn is_current(&self, index: usize, generation: u64) -> bool {
@@ -182,6 +216,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_keys(ui.ctx());
         self.take_replies(ui.ctx());
+        self.take_thumbs(ui.ctx());
         self.request_preview_if_changed();
         panels::top::show(self, ui);
         panels::status::show(self, ui);

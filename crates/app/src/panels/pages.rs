@@ -1,6 +1,14 @@
-//! Left panel listing the pages, one row per picture.
+//! Left panel listing the pages: a thumbnail and the file name for each.
+
+use egui::{Align2, Color32, FontId, Rect, Sense};
 
 use crate::app::App;
+use crate::editor::paint_fitted;
+
+/// Height of one page row, in points.
+const ROW_HEIGHT: f32 = 96.0;
+const THUMB_W: f32 = 120.0;
+const THUMB_H: f32 = 84.0;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     egui::Panel::left("pages").exact_size(220.0).show(ui, |ui| {
@@ -11,26 +19,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn page_list(app: &mut App, ui: &mut egui::Ui) {
-    let row_height = ui.spacing().interact_size.y;
-    let pitch = row_height + ui.spacing().item_spacing.y;
+    let pitch = ROW_HEIGHT + ui.spacing().item_spacing.y;
     let mut scroll = egui::ScrollArea::vertical();
     if app.reveal_selected {
-        let centred = app.selected as f32 * pitch - (ui.available_height() - row_height) / 2.0;
+        let centred = app.selected as f32 * pitch - (ui.available_height() - ROW_HEIGHT) / 2.0;
         scroll = scroll.vertical_scroll_offset(centred.max(0.0));
         app.reveal_selected = false;
     }
     let count = app.page_count();
     let selected = app.selected;
     let mut clicked = None;
-    scroll.show_rows(ui, row_height, count, |ui, range| {
+    scroll.show_rows(ui, ROW_HEIGHT, count, |ui, range| {
         for index in range {
-            let Some(entry) = app.project.as_ref().and_then(|p| p.entries.get(index)) else {
-                continue;
-            };
-            if ui
-                .selectable_label(index == selected, entry.file_name.as_str())
-                .clicked()
-            {
+            if page_row(ui, app, index, index == selected) {
                 clicked = Some(index);
             }
         }
@@ -38,4 +39,35 @@ fn page_list(app: &mut App, ui: &mut egui::Ui) {
     if let Some(index) = clicked {
         app.select(index);
     }
+}
+
+/// One row: the thumbnail, or a grey box until it arrives, and the file name. True when clicked.
+fn page_row(ui: &mut egui::Ui, app: &App, index: usize, selected: bool) -> bool {
+    let Some(entry) = app.project.as_ref().and_then(|p| p.entries.get(index)) else {
+        return false;
+    };
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+    let painter = ui.painter();
+    if selected {
+        painter.rect_filled(rect, 4.0, ui.visuals().selection.bg_fill);
+    }
+    let thumb_box = Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.top() + THUMB_H / 2.0),
+        egui::vec2(THUMB_W, THUMB_H),
+    );
+    match app.thumbs.get(index).and_then(|t| t.as_ref()) {
+        Some(texture) => paint_fitted(painter, texture, thumb_box),
+        None => {
+            painter.rect_filled(thumb_box, 2.0, Color32::from_gray(60));
+        }
+    }
+    painter.text(
+        egui::pos2(rect.center().x, rect.top() + THUMB_H),
+        Align2::CENTER_TOP,
+        entry.file_name.as_str(),
+        FontId::proportional(11.0),
+        ui.visuals().text_color(),
+    );
+    response.clicked()
 }

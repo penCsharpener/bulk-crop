@@ -35,14 +35,17 @@ pub fn show(app: &App, ui: &mut egui::Ui) {
 /// Draws the texture centred in the area, scaled to fit with a 4 % margin.
 fn draw_fitted(ui: &mut egui::Ui, texture: &egui::TextureHandle) {
     let area = ui.available_rect_before_wrap();
-    let inner = area.shrink2(area.size() * 0.04);
+    paint_fitted(ui.painter(), texture, area.shrink2(area.size() * 0.04));
+}
+
+/// Paints the texture centred in `area`, scaled to fit without changing its shape.
+pub fn paint_fitted(painter: &egui::Painter, texture: &egui::TextureHandle, area: egui::Rect) {
     let [w, h] = texture.size().map(|v| v as f32);
     if w < 1.0 || h < 1.0 {
         return;
     }
-    let scale = (inner.width() / w).min(inner.height() / h);
-    let rect = egui::Rect::from_center_size(inner.center(), egui::vec2(w, h) * scale);
+    let scale = (area.width() / w).min(area.height() / h);
+    let rect = egui::Rect::from_center_size(area.center(), egui::vec2(w, h) * scale);
     let full_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-    ui.painter()
-        .image(texture.id(), rect, full_uv, egui::Color32::WHITE);
+    painter.image(texture.id(), rect, full_uv, egui::Color32::WHITE);
 }
