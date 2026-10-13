@@ -11,6 +11,8 @@ use crate::app::{App, Content, Drag, ResultView, ToneView};
 const MIN_FRAME: (f32, f32) = (0.02, 0.02);
 /// How close the pointer must be to a handle, in screen points.
 const HANDLE_REACH: f32 = 8.0;
+/// The largest zoom: the picture can be magnified up to this many times its fitted size.
+const MAX_ZOOM: f32 = 8.0;
 const HANDLE_SIZE: f32 = 9.0;
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(64, 156, 255);
 
@@ -57,12 +59,13 @@ fn canvas(app: &mut App, ui: &mut egui::Ui, texture: &egui::TextureHandle) {
     }
     let adjust = app.effective();
     let texture = toned_texture(app, ui.ctx(), texture, adjust);
-    let Some(layout) = Layout::new(&texture, adjust, area) else {
+    let Some(layout) = Layout::new(&texture, adjust, area, app.zoom_factor, app.pan) else {
         return;
     };
     let painter = ui.painter_at(area);
     paint_picture(&painter, &texture, adjust, &layout);
     paint_frame(&painter, &layout, area, adjust.crop, app.show_grid);
+    view_input(app, ui, &response, &layout, adjust.crop);
     handle_pointer(app, ui, &response, &layout, adjust);
 }
 
@@ -148,8 +151,11 @@ fn show_result(app: &mut App, ui: &egui::Ui, area: egui::Rect) {
 
 /// Where the picture sits on screen, and how frame fractions map to screen points.
 struct Layout {
+    /// The centre of the fitted area: where the picture is centred when it is not panned.
+    fit_centre: egui::Pos2,
+    /// Where the centre of the picture is now: `fit_centre` moved by the pan.
     centre: egui::Pos2,
-    /// Screen points per preview pixel.
+    /// Screen points per preview pixel, zoom included.
     scale: f32,
     /// The preview after its quarter turns, in preview pixels.
     base: Size,
@@ -158,17 +164,26 @@ struct Layout {
 }
 
 impl Layout {
-    /// Fits the base picture into the area with a 4 % margin. None when there is nothing to draw.
-    fn new(texture: &egui::TextureHandle, adjust: Adjust, area: egui::Rect) -> Option<Layout> {
+    /// Fits the base picture into the area with a 4 % margin, then applies the zoom and the pan.
+    /// None when there is nothing to draw.
+    fn new(
+        texture: &egui::TextureHandle,
+        adjust: Adjust,
+        area: egui::Rect,
+        zoom: f32,
+        pan: egui::Vec2,
+    ) -> Option<Layout> {
         let [w, h] = texture.size().map(|v| v as f32);
         let base = base_size(Size { w, h }, adjust.quarter_turns);
         let inner = area.shrink2(area.size() * 0.04);
-        let scale = (inner.width() / base.w).min(inner.height() / base.h);
+        let scale = (inner.width() / base.w).min(inner.height() / base.h) * zoom;
         if base.w < 1.0 || base.h < 1.0 || scale.is_nan() || scale <= 0.0 {
             return None;
         }
+        let fit_centre = inner.center();
         Some(Layout {
-            centre: inner.center(),
+            fit_centre,
+            centre: fit_centre + pan,
             scale,
             base,
             texture: egui::vec2(w, h),
@@ -310,6 +325,70 @@ fn cursor_for(handle: Handle) -> egui::CursorIcon {
     }
 }
 
+/// How close the pointer must be to a handle, as fractions of the base picture.
+fn reach(layout: &Layout) -> (f32, f32) {
+    let base = layout.base_points();
+    (HANDLE_REACH / base.x, HANDLE_REACH / base.y)
+}
+
+/// Wheel zoom around the pointer, and pan with the middle button or with Space and the left button.
+/// A double click on empty canvas returns to the fitted view.
+fn view_input(
+    app: &mut App,
+    ui: &egui::Ui,
+    response: &egui::Response,
+    layout: &Layout,
+    crop: CropRect,
+) {
+    let mut changed = false;
+    let scroll = if response.hovered() {
+        ui.input(|i| i.smooth_scroll_delta.y)
+    } else {
+        0.0
+    };
+    if scroll != 0.0
+        && let Some(pointer) = response.hover_pos()
+    {
+        zoom_about(app, layout, pointer, (scroll / 200.0).exp());
+        changed = true;
+    }
+    if panning(ui, response) {
+        app.pan += response.drag_delta();
+        changed = true;
+    }
+    let on_handle = response
+        .hover_pos()
+        .and_then(|pos| hit_test(crop, layout.to_frame(pos), reach(layout)))
+        .is_some();
+    if response.double_clicked() && !on_handle {
+        app.reset_view();
+        changed = true;
+    }
+    if changed {
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Changes the zoom by `factor`, keeping the point under `pointer` where it is on screen.
+fn zoom_about(app: &mut App, layout: &Layout, pointer: egui::Pos2, factor: f32) {
+    let zoom = (app.zoom_factor * factor).clamp(1.0, MAX_ZOOM);
+    let ratio = zoom / app.zoom_factor;
+    let centre = pointer + (layout.centre - pointer) * ratio;
+    app.zoom_factor = zoom;
+    app.pan = if zoom <= 1.0 {
+        egui::Vec2::ZERO
+    } else {
+        centre - layout.fit_centre
+    };
+}
+
+/// Whether the pointer pans the picture: the middle button, or the left button while Space is held.
+fn panning(ui: &egui::Ui, response: &egui::Response) -> bool {
+    response.dragged_by(egui::PointerButton::Middle)
+        || (response.dragged_by(egui::PointerButton::Primary)
+            && ui.input(|i| i.key_down(egui::Key::Space)))
+}
+
 fn handle_pointer(
     app: &mut App,
     ui: &egui::Ui,
@@ -317,8 +396,7 @@ fn handle_pointer(
     layout: &Layout,
     adjust: Adjust,
 ) {
-    let base = layout.base_points();
-    let reach = (HANDLE_REACH / base.x, HANDLE_REACH / base.y);
+    let reach = reach(layout);
     let hover = response
         .hover_pos()
         .and_then(|pos| hit_test(adjust.crop, layout.to_frame(pos), reach));
@@ -327,7 +405,9 @@ fn handle_pointer(
         ui.ctx().set_cursor_icon(cursor_for(handle));
     }
 
-    if response.drag_started() {
+    // Space turns a left drag into a pan, so it never starts a handle drag.
+    let space = ui.input(|i| i.key_down(egui::Key::Space));
+    if response.drag_started_by(egui::PointerButton::Primary) && !space {
         let press = ui.input(|i| i.pointer.press_origin());
         if let Some(press) = press {
             let press_frac = layout.to_frame(press);
@@ -341,7 +421,9 @@ fn handle_pointer(
             }
         }
     }
-    if let Some(drag) = app.drag.filter(|_| response.dragged())
+    if let Some(drag) = app
+        .drag
+        .filter(|_| response.dragged_by(egui::PointerButton::Primary))
         && let Some(pos) = response.interact_pointer_pos()
     {
         let now = layout.to_frame(pos);

@@ -59,6 +59,10 @@ pub struct App {
     pub export_dialog: ExportDialog,
     /// The changes that can be undone and redone.
     pub history: History,
+    /// How far the picture is zoomed in the editor: 1 fits it to the area, up to 8.
+    pub zoom_factor: f32,
+    /// Where the centre of the picture sits, in points away from the centre of the fitted area.
+    pub pan: egui::Vec2,
     /// The page being changed and its settings before the change, from `begin_edit` until
     /// `commit_edit`.
     edit_start: Option<(usize, Option<Adjust>)>,
@@ -132,6 +136,8 @@ impl App {
             notice: None,
             export_dialog: ExportDialog::default(),
             history: History::default(),
+            zoom_factor: 1.0,
+            pan: egui::Vec2::ZERO,
             edit_start: None,
         };
         if let Some(dir) = folder {
@@ -351,6 +357,12 @@ impl App {
         self.save_settings();
     }
 
+    /// Returns the editor to the fitted view.
+    pub fn reset_view(&mut self) {
+        self.zoom_factor = 1.0;
+        self.pan = egui::Vec2::ZERO;
+    }
+
     /// Takes back the last change and selects the page it changed.
     pub fn undo(&mut self) {
         self.step_history(History::undo);
@@ -489,6 +501,9 @@ impl App {
         // Letters and arrows typed into a text field belong to the field, not to the shortcuts.
         if ctx.egui_wants_keyboard_input() {
             return;
+        }
+        if ctx.input(|input| input.key_pressed(egui::Key::Num0)) {
+            self.reset_view();
         }
         let (undo, redo) = ctx.input(history_keys_pressed);
         let idle = !self.export_dialog.is_running() && !self.editing();
