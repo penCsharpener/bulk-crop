@@ -2447,6 +2447,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "image",
  "pagecrop-core",
  "pagecrop-testkit",
 ]
@@ -2460,6 +2461,7 @@ dependencies = [
  "image",
  "kamadak-exif",
  "natord",
+ "pagecrop-testkit",
  "tempfile",
  "thiserror 2.0.21",
 ]

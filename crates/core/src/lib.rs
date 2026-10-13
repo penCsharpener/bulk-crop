@@ -3,9 +3,11 @@
 
 pub mod crop_edit;
 pub mod decode;
+pub mod encode;
 pub mod error;
 pub mod geometry;
 pub mod model;
+pub mod render;
 pub mod scan;
 
 /// The version of this crate, taken from `Cargo.toml`.
