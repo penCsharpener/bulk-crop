@@ -3,11 +3,14 @@
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use filetime::FileTime;
 use image::{Rgb, RgbImage};
 
 const TABLE: [u8; 3] = [40, 40, 40];
 const PAGE: [u8; 3] = [245, 245, 240];
 const INK: [u8; 3] = [30, 30, 30];
+/// Modification time of the first page written with `reverse_mtime`, in seconds since the epoch.
+const BOOK_EPOCH: i64 = 1_700_000_000;
 
 /// One page on a dark table, turned clockwise by `angle_deg` around the centre of the picture.
 /// Each page has `index + 1` dark squares in a band near its top, so pages can be told apart.
@@ -49,12 +52,14 @@ fn is_marker(u: f32, v: f32, index: u32) -> bool {
 
 /// Writes `count` pages as `page_001.jpg`, `page_002.jpg`, ... at quality 90 into `dir`,
 /// creating `dir` if needed. Page `i` (counted from 0) is tilted by `i * drift_deg`.
+/// With `reverse_mtime`, later pages get older modification times, so the last page is the oldest.
 pub fn write_book(
     dir: &Path,
     count: u32,
     w: u32,
     h: u32,
     drift_deg: f32,
+    reverse_mtime: bool,
 ) -> std::io::Result<Vec<PathBuf>> {
     std::fs::create_dir_all(dir).map_err(|e| with_path(e, dir))?;
     let mut paths = Vec::with_capacity(count as usize);
@@ -62,6 +67,11 @@ pub fn write_book(
         let path = dir.join(format!("page_{:03}.jpg", i + 1));
         let img = page_image(w, h, i, i as f32 * drift_deg);
         write_jpeg(&img, &path).map_err(|e| with_path(e, &path))?;
+        if reverse_mtime {
+            let secs = BOOK_EPOCH - i64::from(i) * 60;
+            filetime::set_file_mtime(&path, FileTime::from_unix_time(secs, 0))
+                .map_err(|e| with_path(e, &path))?;
+        }
         paths.push(path);
     }
     Ok(paths)
@@ -99,7 +109,7 @@ mod tests {
     #[test]
     fn write_book_creates_count_files() {
         let dir = tempfile::tempdir().unwrap();
-        let paths = write_book(dir.path(), 3, 80, 60, 0.0).unwrap();
+        let paths = write_book(dir.path(), 3, 80, 60, 0.0, false).unwrap();
         assert_eq!(paths.len(), 3);
         for name in ["page_001.jpg", "page_002.jpg", "page_003.jpg"] {
             assert!(dir.path().join(name).is_file(), "missing {name}");
