@@ -33,3 +33,22 @@ about 140 MB per worker (four workers on this machine) matches that section's es
 worker for a 12-megapixel photo, so memory is not the surprise here. The speed is. The export runs
 up to eight threads, and this machine has four cores, so the next step to look at is the decode and
 resize of each photo.
+
+## Final check on a book (row 0001.19)
+
+Run on a synthetic book, not real photos: 50 synthetic JPEG pages, 1600 × 1200 pixels, made with
+`pagecrop-cli gen-fixtures`. Steps in the app: 0.5° on page 1, 0.2° more on page 20 (so it reads 0.7°),
+a 0.3° change on page 10 and an undo of it, then an export with the long edge at 1600 and the other
+defaults.
+
+| Check | Result |
+|---|---|
+| `sha256sum *.jpg` before and after, compared with `diff` | No difference: the originals are untouched |
+| New entries in the photo folder | `pagecrop.json` and `cropped` only |
+| Pictures in `cropped` | 50, one per photo, all 1600 × 1200, no `.tmp` files left |
+| Pages that needed their own settings | 2 (pages 1 and 20; the undone change on page 10 is gone) |
+
+I did not compare the exported pictures pixel by pixel with the app's result view. The synthetic
+pages turn about 0.4° more with each page, so these small settings do not make the pages upright.
+This check shows that the export runs and writes the right files. It does not show that a real book
+comes out straight.
