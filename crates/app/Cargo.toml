@@ -11,6 +11,24 @@ path = "src/main.rs"
 eframe = { version = "0.36.2", features = ["persistence"] }
 egui = "0.36.2"
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
-pagecrop-core = { version = "0.1.0", path = "../core" }
+pagecrop-core = { version = "0.2.0", path = "../core" }
 rayon = "1.12.0"
 rfd = "0.17.2"
+
+# Read by `cargo deb` (see scripts/build-deb.sh).
+[package.metadata.deb]
+name = "pagecrop"
+maintainer = "penCsharpener <26190934+penCsharpener@users.noreply.github.com>"
+copyright = "penCsharpener"
+extended-description = """\
+pagecrop crops, straightens and shrinks photos of book pages in bulk. An adjustment made on one \
+page applies to every following page until the next page that has its own adjustment."""
+section = "graphics"
+priority = "optional"
+depends = "$auto"
+recommends = "xdg-desktop-portal"
+assets = [
+    ["target/release/pagecrop", "usr/bin/", "755"],
+    ["../../assets/pagecrop.desktop", "usr/share/applications/", "644"],
+    ["../../assets/pagecrop.png", "usr/share/icons/hicolor/64x64/apps/", "644"],
+]
