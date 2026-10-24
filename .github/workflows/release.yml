@@ -1,0 +1,96 @@
+# Builds the Linux .deb and the Windows .exe when a tag such as v0.2.0 is pushed, and attaches them
+# to a GitHub release. Git tags do not belong to a branch: every tag pushed to the repository starts it.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag matches the version in Cargo.toml
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "$tag_version" != "$cargo_version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME says version $tag_version, but Cargo.toml says version $cargo_version. Bump version in the root Cargo.toml, commit, and tag again."
+            exit 1
+          fi
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  deb:
+    needs: check
+    # An older Ubuntu has an older glibc, so the package installs on more systems.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system packages
+        # dpkg-dev provides dpkg-shlibdeps, which cargo-deb uses to fill in "$auto" dependencies.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config dpkg-dev
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build the package
+        run: cargo deb -p pagecrop
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb
+          path: target/debian/*.deb
+          if-no-files-found: error
+
+  exe:
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p pagecrop -p pagecrop-cli
+      - name: Pack
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="pagecrop-${version}-windows-x86_64"
+          mkdir -p dist/stage
+          cp target/release/pagecrop.exe target/release/pagecrop-cli.exe LICENSE README.md dist/stage/
+          cp target/release/pagecrop.exe "dist/${name}.exe"
+          echo "NAME=${name}" >> "$GITHUB_ENV"
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/stage/* -DestinationPath "dist/$env:NAME.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: |
+            dist/*.zip
+            dist/*.exe
+          if-no-files-found: error
+
+  release:
+    needs: [deb, exe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/*
+          generate_release_notes: true

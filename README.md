@@ -120,6 +120,20 @@ Your photos are never changed. The only exception is the bin button: after you c
 photo to the desktop trash, from where you can restore it. pagecrop writes only `pagecrop.json` in the
 photo folder, and the pictures into the export folder, which it creates only when you start an export.
 
+## Releases
+
+Pushing a tag builds the Linux `.deb` and the Windows `.exe` on GitHub Actions and attaches them to a
+GitHub release (`.github/workflows/release.yml`). To publish a version, bump `version` in the root
+`Cargo.toml`, commit, then tag and push the tag:
+
+```sh
+git tag v<version>
+git push origin v<version>
+```
+
+The tag must equal the version in `Cargo.toml` (without the `v`), or the workflow stops before building.
+The Windows build is checked to compile but has not been run on Windows.
+
 ## Deferred features
 
 These are not in this version. Each can be added later.
