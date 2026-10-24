@@ -2464,7 +2464,7 @@ dependencies = [
 
 [[package]]
 name = "pagecrop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eframe",
  "egui",
@@ -2476,7 +2476,7 @@ dependencies = [
 
 [[package]]
 name = "pagecrop-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2487,7 +2487,7 @@ dependencies = [
 
 [[package]]
 name = "pagecrop-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "filetime",
@@ -2505,7 +2505,7 @@ dependencies = [
 
 [[package]]
 name = "pagecrop-testkit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "filetime",
  "image",
