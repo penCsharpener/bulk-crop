@@ -76,7 +76,16 @@ pub struct App {
     /// The frame of the selected page when the current angle drag began, so dragging the angle out
     /// and back gives the frame back. None while no angle drag is running.
     pub angle_start: Option<CropRect>,
+    /// How close the pointer must be to a frame edge or corner to grab it, in per cent of the
+    /// picture's shorter side. An app-wide setting, kept between runs.
+    pub handle_reach_percent: f32,
 }
+
+/// The range of `handle_reach_percent`, in per cent.
+pub const REACH_RANGE: (f32, f32) = (1.0, 15.0);
+
+/// The key under which the handle reach is stored in eframe's settings.
+const REACH_KEY: &str = "handle_reach_percent";
 
 /// How many previews are kept in memory.
 const CACHE_SIZE: usize = 12;
@@ -163,6 +172,7 @@ impl App {
     pub fn new(
         ctx: egui::Context,
         folder: Option<PathBuf>,
+        storage: Option<&dyn eframe::Storage>,
     ) -> Result<App, rayon::ThreadPoolBuildError> {
         let mut app = App {
             project: None,
@@ -194,7 +204,13 @@ impl App {
             merge_next: false,
             nudge_page: None,
             angle_start: None,
+            handle_reach_percent: 5.0,
         };
+        if let Some(storage) = storage
+            && let Some(p) = eframe::get_value::<f32>(storage, REACH_KEY)
+        {
+            app.handle_reach_percent = p.clamp(REACH_RANGE.0, REACH_RANGE.1);
+        }
         if let Some(dir) = folder {
             app.open_folder(&dir);
         }
@@ -755,6 +771,10 @@ fn key_target(input: &egui::InputState, current: usize, last: usize) -> Option<u
 }
 
 impl eframe::App for App {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, REACH_KEY, &self.handle_reach_percent);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_keys(ui.ctx());
         self.take_replies(ui.ctx());
