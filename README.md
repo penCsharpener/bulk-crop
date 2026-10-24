@@ -140,3 +140,7 @@ These are not in this version. Each can be added later.
   than a single pass would give.
 - Speed: on the machine used for the measurement, about 2.7 photos per second, measured on synthetic
   photos. See `docs/performance.md`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

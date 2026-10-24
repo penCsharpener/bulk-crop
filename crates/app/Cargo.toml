@@ -2,6 +2,7 @@
 name = "pagecrop"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Crop, straighten and shrink photos of book pages in bulk"
 
 [[bin]]
@@ -20,7 +21,8 @@ rfd = "0.17.2"
 [package.metadata.deb]
 name = "pagecrop"
 maintainer = "penCsharpener <26190934+penCsharpener@users.noreply.github.com>"
-copyright = "penCsharpener"
+copyright = "2026 penCsharpener"
+license-file = ["../../LICENSE", "0"]
 extended-description = """\
 pagecrop crops, straightens and shrinks photos of book pages in bulk. An adjustment made on one \
 page applies to every following page until the next page that has its own adjustment."""
