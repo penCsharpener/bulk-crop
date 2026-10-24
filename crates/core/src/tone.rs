@@ -1,6 +1,65 @@
 //! Brightness, contrast and greyscale. The tone is a table of 256 values, one per input level.
 
 use image::{GrayImage, Luma, RgbImage};
+use serde::{Deserialize, Serialize};
+
+use crate::model::Adjust;
+
+/// How many tone settings `remember` keeps.
+pub const TONE_MEMORY: usize = 3;
+
+/// The three tone controls of a page, taken together so they can be remembered and put back at once.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToneSetting {
+    /// -100 to 100.
+    pub brightness: i32,
+    /// -100 to 100.
+    pub contrast: i32,
+    pub grayscale: bool,
+}
+
+impl ToneSetting {
+    /// The tone of `adjust`.
+    pub fn of(adjust: &Adjust) -> ToneSetting {
+        ToneSetting {
+            brightness: adjust.brightness,
+            contrast: adjust.contrast,
+            grayscale: adjust.grayscale,
+        }
+    }
+
+    /// `adjust` with this tone and everything else unchanged.
+    pub fn applied_to(self, adjust: Adjust) -> Adjust {
+        Adjust {
+            brightness: self.brightness,
+            contrast: self.contrast,
+            grayscale: self.grayscale,
+            ..adjust
+        }
+    }
+}
+
+/// The remembered tones after `tone` was set, newest first and at most `TONE_MEMORY` long.
+/// `replacing` is the entry the same run of edits created earlier; it is taken out first, so
+/// brightness followed by contrast leaves one entry and not two. The default tone is not stored,
+/// and a tone that is already listed keeps its place.
+pub fn remember(
+    list: &[ToneSetting],
+    tone: ToneSetting,
+    replacing: Option<ToneSetting>,
+) -> Vec<ToneSetting> {
+    let mut out: Vec<ToneSetting> = list
+        .iter()
+        .copied()
+        .filter(|t| Some(*t) != replacing)
+        .collect();
+    if tone != ToneSetting::default() && !out.contains(&tone) {
+        out.insert(0, tone);
+        out.truncate(TONE_MEMORY);
+    }
+    out
+}
 
 /// The output level for every input level, from brightness and contrast (each -100 to 100).
 /// Brightness is a gamma curve: 0 and 255 stay where they are, and the middle moves most.
@@ -47,6 +106,81 @@ pub fn to_gray(img: &RgbImage) -> GrayImage {
 mod tests {
     use super::*;
     use image::{Rgb, RgbImage};
+
+    fn tone(brightness: i32, contrast: i32) -> ToneSetting {
+        ToneSetting {
+            brightness,
+            contrast,
+            grayscale: false,
+        }
+    }
+
+    #[test]
+    fn new_tone_goes_to_the_front() {
+        let list = remember(&[tone(10, 0)], tone(20, 5), None);
+        assert_eq!(list, vec![tone(20, 5), tone(10, 0)]);
+    }
+
+    #[test]
+    fn list_is_cut_to_three() {
+        let list = [tone(1, 0), tone(2, 0), tone(3, 0)];
+        let list = remember(&list, tone(4, 0), None);
+        assert_eq!(list, vec![tone(4, 0), tone(1, 0), tone(2, 0)]);
+    }
+
+    #[test]
+    fn known_tone_keeps_its_place() {
+        let list = [tone(1, 0), tone(2, 0), tone(3, 0)];
+        assert_eq!(remember(&list, tone(3, 0), None), list.to_vec());
+    }
+
+    #[test]
+    fn default_tone_is_not_stored() {
+        let list = [tone(1, 0)];
+        assert_eq!(remember(&list, ToneSetting::default(), None), list.to_vec());
+    }
+
+    #[test]
+    fn replacing_entry_is_swapped_for_the_new_one() {
+        let list = [tone(30, 0), tone(7, 7)];
+        let list = remember(&list, tone(30, 20), Some(tone(30, 0)));
+        assert_eq!(list, vec![tone(30, 20), tone(7, 7)]);
+    }
+
+    #[test]
+    fn replacing_an_unlisted_tone_changes_nothing_else() {
+        let list = [tone(7, 7)];
+        let list = remember(&list, tone(30, 20), Some(tone(99, 99)));
+        assert_eq!(list, vec![tone(30, 20), tone(7, 7)]);
+    }
+
+    #[test]
+    fn of_and_applied_to_round_trip() {
+        let page = Adjust {
+            quarter_turns: 1,
+            angle_deg: 2.5,
+            alternate: true,
+            brightness: 40,
+            contrast: -10,
+            grayscale: true,
+            ..Adjust::default()
+        };
+        let other = Adjust {
+            brightness: 5,
+            ..Adjust::default()
+        };
+        let moved = ToneSetting::of(&page).applied_to(other);
+        assert_eq!(ToneSetting::of(&moved), ToneSetting::of(&page));
+        assert_eq!(
+            moved,
+            Adjust {
+                brightness: 40,
+                contrast: -10,
+                grayscale: true,
+                ..other
+            }
+        );
+    }
 
     #[test]
     fn zero_zero_is_identity_table() {
