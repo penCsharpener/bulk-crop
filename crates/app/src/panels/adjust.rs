@@ -2,6 +2,7 @@
 
 use pagecrop_core::geometry::quarter_turn;
 use pagecrop_core::model::Adjust;
+use pagecrop_core::tone::ToneSetting;
 
 use crate::app::{App, REACH_RANGE};
 use crate::theme;
@@ -105,7 +106,9 @@ fn tone(app: &mut App, ui: &mut egui::Ui) {
             ..current
         });
     }
+    presets(app, ui, ToneSetting::of(&current));
     if ui.button("Reset tone").clicked() {
+        app.end_tone_run();
         app.edit_once(Adjust {
             brightness: 0,
             contrast: 0,
@@ -113,6 +116,56 @@ fn tone(app: &mut App, ui: &mut egui::Ui) {
             ..current
         });
     }
+}
+
+/// The recent tone settings as buttons; the one the page has now is drawn selected.
+fn presets(app: &mut App, ui: &mut egui::Ui, now: ToneSetting) {
+    if app.tone_presets.is_empty() {
+        return;
+    }
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.weak("Recent");
+        for tone in &app.tone_presets {
+            let button = ui
+                .selectable_label(now == *tone, preset_label(*tone))
+                .on_hover_text(preset_hint(*tone));
+            if button.clicked() {
+                picked = Some(*tone);
+            }
+        }
+    });
+    if let Some(tone) = picked {
+        app.use_tone_preset(tone);
+    }
+}
+
+/// A value with its sign, using the minus sign; zero has none.
+fn signed(v: i32) -> String {
+    match v {
+        0 => "0".to_owned(),
+        v if v < 0 => format!("−{}", -v),
+        v => format!("+{v}"),
+    }
+}
+
+/// "+30 / −10", brightness then contrast, with "grey" after it for greyscale.
+fn preset_label(tone: ToneSetting) -> String {
+    let base = format!("{} / {}", signed(tone.brightness), signed(tone.contrast));
+    if tone.grayscale {
+        format!("{base} grey")
+    } else {
+        base
+    }
+}
+
+fn preset_hint(tone: ToneSetting) -> String {
+    format!(
+        "Brightness {}, contrast {}{}",
+        signed(tone.brightness),
+        signed(tone.contrast),
+        if tone.grayscale { ", greyscale" } else { "" },
+    )
 }
 
 /// How a control's changes reach the edit helpers. A drag begins with its drag start and commits

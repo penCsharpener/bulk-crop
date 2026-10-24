@@ -12,6 +12,7 @@ use pagecrop_core::geometry::{Size, base_size, fit_inside, quarter_turn};
 use pagecrop_core::history::{Edit, History};
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy, read_ahead_order};
 use pagecrop_core::persist::{self, SIDECAR_NAME};
+use pagecrop_core::tone::{TONE_MEMORY, ToneSetting, record};
 
 use crate::export_dialog::{self, ExportDialog};
 use crate::loader::{Loader, PreviewReply, PreviewRequest, Thumbnails};
@@ -89,6 +90,14 @@ pub struct App {
     /// How close the pointer must be to a frame edge or corner to grab it, in per cent of the
     /// picture's shorter side. An app-wide setting, kept between runs.
     pub handle_reach_percent: f32,
+    /// The last tone settings, newest first, offered as buttons in the Tone section. An app-wide
+    /// habit of the user, kept between runs.
+    pub tone_presets: Vec<ToneSetting>,
+    /// The entry of `tone_presets` that the current run of tone edits created, so the next edit of
+    /// the run replaces it instead of adding a second one.
+    tone_run: Option<ToneSetting>,
+    /// The tone of the page as it was when the edit began, to tell whether the edit changed it.
+    edit_tone: ToneSetting,
 }
 
 /// The range of `handle_reach_percent`, in per cent.
@@ -99,6 +108,9 @@ const REACH_KEY: &str = "handle_reach_percent";
 
 /// The key under which the folder that was open at the last save is stored in eframe's settings.
 const FOLDER_KEY: &str = "last_folder";
+
+/// The key under which the tone presets are stored in eframe's settings.
+const TONE_KEY: &str = "tone_presets";
 
 /// How many previews are kept in memory.
 const CACHE_SIZE: usize = 12;
@@ -230,11 +242,20 @@ impl App {
             nudge_page: None,
             angle_start: None,
             handle_reach_percent: 5.0,
+            tone_presets: Vec::new(),
+            tone_run: None,
+            edit_tone: ToneSetting::default(),
         };
         if let Some(storage) = storage
             && let Some(p) = eframe::get_value::<f32>(storage, REACH_KEY)
         {
             app.handle_reach_percent = p.clamp(REACH_RANGE.0, REACH_RANGE.1);
+        }
+        if let Some(storage) = storage
+            && let Some(mut tones) = eframe::get_value::<Vec<ToneSetting>>(storage, TONE_KEY)
+        {
+            tones.truncate(TONE_MEMORY);
+            app.tone_presets = tones;
         }
         let stored = storage.and_then(|s| eframe::get_value::<String>(s, FOLDER_KEY));
         if let Some(dir) = startup_folder(folder, stored) {
@@ -278,6 +299,7 @@ impl App {
         self.pending_sort = None;
         self.history.clear();
         self.edit_start = None;
+        self.tone_run = None;
         self.clear_spin();
         self.error = None;
         self.saved_at = None;
@@ -307,7 +329,11 @@ impl App {
 
     /// Selects page `index`, clamped to the last page.
     pub fn select(&mut self, index: usize) {
-        self.selected = index.min(self.page_count().saturating_sub(1));
+        let selected = index.min(self.page_count().saturating_sub(1));
+        if selected != self.selected {
+            self.tone_run = None;
+        }
+        self.selected = selected;
         self.nudge_page = None;
     }
 
@@ -479,6 +505,7 @@ impl App {
             .as_ref()
             .and_then(|p| p.entries.get(self.selected))
             .map(|entry| (self.selected, entry.key));
+        self.edit_tone = ToneSetting::of(&self.effective());
     }
 
     /// Whether an edit has begun and not yet been committed, such as while a slider is dragged.
@@ -503,8 +530,31 @@ impl App {
             } else {
                 self.history.push(edit);
             }
+            let tone = self
+                .project
+                .as_ref()
+                .map(|p| ToneSetting::of(&p.effective(index)));
+            if let Some(tone) = tone.filter(|t| *t != self.edit_tone) {
+                self.record_tone(tone);
+            }
         }
         self.save_settings();
+    }
+
+    /// Adds `tone` to the presets, replacing the entry the current run of tone edits made.
+    fn record_tone(&mut self, tone: ToneSetting) {
+        (self.tone_presets, self.tone_run) = record(&self.tone_presets, self.tone_run, tone);
+    }
+
+    /// Ends the run of tone edits, so the next tone change adds its own preset.
+    pub fn end_tone_run(&mut self) {
+        self.tone_run = None;
+    }
+
+    /// Gives the selected page the tone of a preset, as one edit.
+    pub fn use_tone_preset(&mut self, tone: ToneSetting) {
+        self.end_tone_run();
+        self.edit_once(tone.applied_to(self.effective()));
     }
 
     /// Returns the editor to the fitted view.
@@ -530,6 +580,7 @@ impl App {
         let Some(index) = step(&mut self.history, project) else {
             return;
         };
+        self.tone_run = None;
         self.select(index);
         self.reveal_selected = true;
         self.save_settings();
@@ -930,6 +981,7 @@ fn key_target(input: &egui::InputState, current: usize, last: usize) -> Option<u
 impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, REACH_KEY, &self.handle_reach_percent);
+        eframe::set_value(storage, TONE_KEY, &self.tone_presets);
         // Only a folder that is open is written, so closing with an error keeps the last good one.
         if let Some(dir) = self.project.as_ref().and_then(|p| p.dir.to_str()) {
             eframe::set_value(storage, FOLDER_KEY, &dir.to_owned());

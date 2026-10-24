@@ -102,6 +102,18 @@ pub fn to_gray(img: &RgbImage) -> GrayImage {
     gray
 }
 
+/// `remember`, and the entry the run of edits owns afterwards: `tone` when this call put it in the
+/// list, else none, because a tone that was already listed is not the run's to replace.
+pub fn record(
+    list: &[ToneSetting],
+    run: Option<ToneSetting>,
+    tone: ToneSetting,
+) -> (Vec<ToneSetting>, Option<ToneSetting>) {
+    let out = remember(list, tone, run);
+    let owned = (out.contains(&tone) && !list.contains(&tone)).then_some(tone);
+    (out, owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +164,35 @@ mod tests {
         let list = [tone(7, 7)];
         let list = remember(&list, tone(30, 20), Some(tone(99, 99)));
         assert_eq!(list, vec![tone(30, 20), tone(7, 7)]);
+    }
+
+    #[test]
+    fn two_edits_of_a_run_leave_one_entry() {
+        let (list, run) = record(&[], None, tone(30, 0));
+        assert_eq!((list.clone(), run), (vec![tone(30, 0)], Some(tone(30, 0))));
+        let (list, run) = record(&list, run, tone(30, 20));
+        assert_eq!((list, run), (vec![tone(30, 20)], Some(tone(30, 20))));
+    }
+
+    #[test]
+    fn a_new_run_adds_a_second_entry() {
+        let (list, _) = record(&[], None, tone(30, 0));
+        let (list, run) = record(&list, None, tone(30, 20));
+        assert_eq!(list, vec![tone(30, 20), tone(30, 0)]);
+        assert_eq!(run, Some(tone(30, 20)));
+    }
+
+    #[test]
+    fn a_listed_tone_is_not_owned_by_the_run() {
+        let list = [tone(5, 5), tone(7, 7)];
+        let (out, run) = record(&list, None, tone(7, 7));
+        assert_eq!((out, run), (list.to_vec(), None));
+    }
+
+    #[test]
+    fn the_default_tone_ends_the_ownership() {
+        let (out, run) = record(&[tone(30, 0)], Some(tone(30, 0)), ToneSetting::default());
+        assert_eq!((out, run), (vec![], None));
     }
 
     #[test]
