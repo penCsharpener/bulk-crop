@@ -275,6 +275,22 @@ impl Project {
         }
     }
 
+    /// Takes page `i` out of the list and returns it. When the page had its own settings and the page
+    /// after it has none, the settings move to that page, so the pages that followed it look the same.
+    /// None when `i` is out of range.
+    pub fn remove_page(&mut self, i: usize) -> Option<ImageEntry> {
+        if i >= self.entries.len() {
+            return None;
+        }
+        let removed = self.entries.remove(i);
+        if let (Some(key), Some(next)) = (removed.key, self.entries.get_mut(i))
+            && next.key.is_none()
+        {
+            next.key = Some(key);
+        }
+        Some(removed)
+    }
+
     fn has_key(&self, i: usize) -> bool {
         self.entries.get(i).is_some_and(|e| e.key.is_some())
     }
@@ -709,5 +725,79 @@ mod tests {
             assert_eq!(seen(&project, page), 20, "page {page}");
         }
         assert_eq!(project.side(5), None);
+    }
+
+    /// Gives pages keys that differ only in brightness. Each pair is a page number from 1 and a value.
+    fn key_pages(project: &mut Project, keys: &[(usize, i32)]) {
+        for &(page, value) in keys {
+            project.set_key(page - 1, brightness(value));
+        }
+    }
+
+    #[test]
+    fn removing_keyed_page_moves_key_to_next() {
+        let mut project = pages(12);
+        key_pages(&mut project, &[(4, 7)]);
+        let removed = project.remove_page(3).unwrap();
+        assert_eq!(removed.file_name, "page_004.jpg");
+        assert_eq!(project.entries.len(), 11);
+        assert_eq!(project.entries[3].file_name, "page_005.jpg");
+        assert_eq!(project.entries[3].key, Some(brightness(7)));
+        for page in 4..=11 {
+            assert_eq!(seen(&project, page), 7, "page {page}");
+        }
+        for page in 1..=3 {
+            assert_eq!(seen(&project, page), 0, "page {page}");
+        }
+    }
+
+    #[test]
+    fn removing_keyed_page_before_keyed_page_drops_key() {
+        let mut project = pages(12);
+        key_pages(&mut project, &[(4, 7), (5, 9)]);
+        project.remove_page(3);
+        assert_eq!(project.entries[3].file_name, "page_005.jpg");
+        assert_eq!(project.entries[3].key, Some(brightness(9)));
+        for page in 4..=11 {
+            assert_eq!(seen(&project, page), 9, "page {page}");
+        }
+    }
+
+    #[test]
+    fn removing_plain_page_keeps_keys() {
+        let mut project = pages(12);
+        key_pages(&mut project, &[(3, 5), (8, 6)]);
+        project.remove_page(4);
+        assert_eq!(project.entries.len(), 11);
+        assert_eq!(project.entries[2].key, Some(brightness(5)));
+        assert_eq!(project.entries[6].file_name, "page_008.jpg");
+        assert_eq!(project.entries[6].key, Some(brightness(6)));
+        assert_eq!(
+            project.entries.iter().filter(|e| e.key.is_some()).count(),
+            2
+        );
+        assert_eq!(seen(&project, 3), 5);
+        assert_eq!(seen(&project, 6), 5);
+        assert_eq!(seen(&project, 7), 6);
+    }
+
+    #[test]
+    fn removing_doubled_shot_restores_sides() {
+        let mut project = pages(7);
+        project.set_key(0, frame(0.1));
+        project.set_key(1, frame(-0.1));
+        // Page 4 is a double of page 3, so page 5 wrongly has frame A.
+        assert_look(&project, 5, 0.1, 0.0);
+        project.remove_page(3);
+        assert_look(&project, 4, -0.1, 0.0);
+        assert_look(&project, 5, 0.1, 0.0);
+    }
+
+    #[test]
+    fn remove_out_of_range_is_none() {
+        let mut project = pages(3);
+        assert!(project.remove_page(3).is_none());
+        assert!(project.remove_page(99).is_none());
+        assert_eq!(project.entries.len(), 3);
     }
 }

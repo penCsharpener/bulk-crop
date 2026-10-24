@@ -3,7 +3,8 @@
 pagecrop crops, straightens and shrinks photos of book pages in bulk. Photographing a book page by
 page makes the book drift: each photo is turned a little and slides a little. pagecrop lets you fix
 one page, and the same fix then applies to every following page until a page that has its own
-setting. Nothing is written to your photos. The result is a separate folder of corrected pictures.
+setting. Your photos are never written to; the one exception is the bin button, which moves a photo to
+the desktop trash after you confirm. The result is a separate folder of corrected pictures.
 
 It runs on Linux, as a desktop window written in Rust with egui.
 
@@ -94,8 +95,9 @@ under a temporary name first, so an interrupted save does not damage it. It hold
 
 Settings for photos that are no longer in the folder are kept in the file, so removing a photo does
 not lose them. A renamed photo does not get its settings back, because they are stored by file name.
-Your photos are never changed. pagecrop writes only `pagecrop.json` in the photo folder, and the
-pictures into the export folder, which it creates only when you start an export.
+Your photos are never changed. The only exception is the bin button: after you confirm, it moves one
+photo to the desktop trash, from where you can restore it. pagecrop writes only `pagecrop.json` in the
+photo folder, and the pictures into the export folder, which it creates only when you start an export.
 
 ## Deferred features
 
