@@ -142,7 +142,7 @@ These are not in this version. Each can be added later.
 - Running in a browser.
 - Two crop frames per photo, for double-page spreads.
 - Four-corner perspective correction.
-- Windows and macOS builds.
+- macOS builds, and testing on Windows (the Windows `.exe` is built but untested).
 - Copying EXIF data, or setting the print resolution in the output.
 - Leaving single photos out of the export.
 - Thumbnails that show the cropped result instead of the whole photo.
