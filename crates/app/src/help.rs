@@ -24,6 +24,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
         "Fit the picture to the window",
     ),
     ("Drag a handle of the frame", "Move that edge or corner"),
+    (
+        "Drag a round handle beside the frame",
+        "Turn the picture in 0.1° steps",
+    ),
     ("Ctrl+Z", "Undo"),
     ("Ctrl+Shift+Z, Ctrl+Y", "Redo"),
     ("Ctrl+O", "Open a folder"),

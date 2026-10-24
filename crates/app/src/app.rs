@@ -51,6 +51,8 @@ pub struct App {
     delete_dont_ask: bool,
     /// The crop-frame drag in progress, if any.
     pub drag: Option<Drag>,
+    /// The spin-handle drag in progress, if any.
+    pub spin: Option<SpinDrag>,
     /// Whether a grid is drawn over the crop frame.
     pub show_grid: bool,
     /// Whether the selected page is shown as it will be exported, instead of with its frame.
@@ -176,6 +178,14 @@ pub struct Drag {
     pub press: (f32, f32),
 }
 
+/// A drag of a spin handle. `start_deg` is the fine angle when the drag began and `press` the
+/// pointer position at that moment, in screen points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpinDrag {
+    pub start_deg: f32,
+    pub press: egui::Pos2,
+}
+
 impl App {
     pub fn new(
         ctx: egui::Context,
@@ -199,6 +209,7 @@ impl App {
             ask_before_delete: true,
             delete_dont_ask: false,
             drag: None,
+            spin: None,
             show_grid: false,
             show_result: false,
             result: None,
@@ -263,6 +274,7 @@ impl App {
         self.pending_sort = None;
         self.history.clear();
         self.edit_start = None;
+        self.clear_spin();
         self.error = None;
         self.saved_at = None;
         self.save_error = None;
@@ -447,6 +459,13 @@ impl App {
     pub fn side_label(&self) -> Option<&'static str> {
         let side = self.project.as_ref()?.side(self.selected)?;
         Some(if side == 0 { "side A" } else { "side B" })
+    }
+
+    /// Ends a spin-handle drag without committing it, and forgets the frame it started from.
+    fn clear_spin(&mut self) {
+        if self.spin.take().is_some() {
+            self.angle_start = None;
+        }
     }
 
     /// Starts an edit: remembers the settings of the selected page as they are before the change.
@@ -689,6 +708,7 @@ impl App {
         self.history.clear();
         self.edit_start = None;
         self.drag = None;
+        self.clear_spin();
         // Previews are cached and still on their way by old index, so they are dropped.
         self.preview_generation += 1;
         self.previews.clear();

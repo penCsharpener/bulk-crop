@@ -58,7 +58,8 @@ top bar.
 3. **Go to the first page that needs fixing.** Use the arrow keys, or click a page in the list.
 4. **Set the frame, the turn, the angle and the tone.** Drag the handles of the frame to crop. Turn with
    R (Shift+R turns the other way) or the ⟲ and ⟳ buttons. Set the fine angle with [ and ] or the
-   slider. Brightness, contrast and greyscale are in the Tone section. The page now has its own
+   slider, or drag a round handle beside the left or right edge of the frame to turn the picture in
+   0.1° steps. Brightness, contrast and greyscale are in the Tone section. The page now has its own
    settings, shown by a dot in the page list. Later pages follow it until the next page with its own
    settings. Press N to jump to that page.
 5. **Check and correct.** Press P to see the result as it will be exported. Ctrl+Z takes back the last
