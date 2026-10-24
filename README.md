@@ -52,7 +52,8 @@ top bar.
 ## Workflow
 
 1. **Open the folder.** Click Open folder…, press Ctrl+O, or start the program with the folder as its
-   argument. Every photo appears in the page list on the left.
+   argument. Every photo appears in the page list on the left. Started without an argument, pagecrop
+   reopens the folder that was open when you last closed it.
 2. **Choose the sort.** Name or Date. Pick the order the pages were photographed in, because a page's
    settings apply to the pages after it in this order.
 3. **Go to the first page that needs fixing.** Use the arrow keys, or click a page in the list.
