@@ -68,6 +68,21 @@ pub fn hit_test(crop: CropRect, pos: (f32, f32), tol: (f32, f32)) -> Option<Hand
     }
 }
 
+/// How close the pointer must be to an edge or corner to grab it, per axis, in frame fractions.
+/// It is `percent` per cent of the base picture's shorter side, so the zone is square on screen.
+/// It is capped at a third of the frame's width (or height), so the middle of a small frame still
+/// moves it, and never below `floor`. A base side that is not positive returns `floor`.
+pub fn handle_reach(base: Size, crop: CropRect, percent: f32, floor: (f32, f32)) -> (f32, f32) {
+    if base.w <= 0.0 || base.h <= 0.0 {
+        return floor;
+    }
+    let reach = percent / 100.0 * base.w.min(base.h);
+    (
+        (reach / base.w).min(crop.w / 3.0).max(floor.0),
+        (reach / base.h).min(crop.h / 3.0).max(floor.1),
+    )
+}
+
 /// The frame after dragging `handle` by `delta`, the total movement since the drag began.
 /// `start` is the frame when the drag began. The frame never leaves `-half..=half` on either axis,
 /// and an edge never comes closer than `min` to the opposite edge.
@@ -266,5 +281,36 @@ mod tests {
         assert!(frame_inside(d, base_1600(), 6.0));
         assert!((d.cx - 0.3935).abs() < 1e-3, "cx = {}", d.cx);
         assert!((d.cy - 0.0187).abs() < 1e-3, "cy = {}", d.cy);
+    }
+
+    #[test]
+    fn reach_is_percent_of_shorter_side() {
+        let r = handle_reach(base_1600(), frame(0.0, 0.0, 1.0, 1.0), 5.0, (0.0, 0.0));
+        assert!(close(r.0, 0.0375), "x = {}", r.0);
+        assert!(close(r.1, 0.05), "y = {}", r.1);
+    }
+
+    #[test]
+    fn reach_is_capped_by_small_frame() {
+        let r = handle_reach(base_1600(), frame(0.0, 0.0, 0.09, 0.09), 5.0, (0.0, 0.0));
+        assert!(close(r.0, 0.03), "x = {}", r.0);
+        assert!(close(r.1, 0.03), "y = {}", r.1);
+    }
+
+    #[test]
+    fn reach_never_below_floor() {
+        let floor = (0.1, 0.2);
+        let r = handle_reach(base_1600(), frame(0.0, 0.0, 1.0, 1.0), 5.0, floor);
+        assert!(close(r.0, 0.1) && close(r.1, 0.2), "{r:?}");
+        let zero = Size { w: 0.0, h: 1200.0 };
+        let r = handle_reach(zero, frame(0.0, 0.0, 1.0, 1.0), 5.0, floor);
+        assert_eq!(r, floor);
+    }
+
+    #[test]
+    fn centre_of_frame_still_moves_with_wide_reach() {
+        let f = frame(0.1, -0.1, 0.4, 0.4);
+        let reach = handle_reach(base_1600(), f, 15.0, (0.0, 0.0));
+        assert_eq!(hit_test(f, (0.1, -0.1), reach), Some(Handle::Move));
     }
 }
