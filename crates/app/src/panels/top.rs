@@ -3,6 +3,7 @@
 use pagecrop_core::model::SortBy;
 
 use crate::app::App;
+use crate::theme;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     egui::Panel::top("top_bar").show(ui, |ui| {
@@ -19,13 +20,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             }
             ui.separator();
             if ui
-                .add_enabled(app.history.can_undo(), egui::Button::new("↶"))
+                .add_enabled(
+                    app.history.can_undo(),
+                    egui::Button::new(theme::arrow_text(ui, "↶", "")),
+                )
                 .clicked()
             {
                 app.undo();
             }
             if ui
-                .add_enabled(app.history.can_redo(), egui::Button::new("↷"))
+                .add_enabled(
+                    app.history.can_redo(),
+                    egui::Button::new(theme::arrow_text(ui, "↷", "")),
+                )
                 .clicked()
             {
                 app.redo();

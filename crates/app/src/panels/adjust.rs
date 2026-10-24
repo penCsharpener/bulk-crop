@@ -61,7 +61,7 @@ fn sides(app: &mut App, ui: &mut egui::Ui) {
     theme::section(ui, "Sides");
     let current = app.effective();
     let mut on = current.alternate;
-    let toggle = ui.toggle_value(&mut on, sides_label(ui)).on_hover_text(
+    let toggle = ui.toggle_value(&mut on, theme::arrow_text(ui, "⇄", " Alternating sides")).on_hover_text(
         "Every second page keeps its own frame and angle. Turning it off here affects this page and the pages after it.",
     );
     if toggle.changed() {
@@ -73,26 +73,6 @@ fn sides(app: &mut App, ui: &mut egui::Ui) {
     if let Some(label) = app.side_label() {
         ui.label(format!("This page: {label}"));
     }
-}
-
-/// "⇄ Alternating sides". The arrows are in the monospace font, because the proportional fonts
-/// have no glyph for them.
-fn sides_label(ui: &egui::Ui) -> egui::text::LayoutJob {
-    let style = ui.style();
-    let color = egui::Color32::PLACEHOLDER;
-    let size = egui::TextStyle::Button.resolve(style).size;
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        "⇄",
-        0.0,
-        egui::TextFormat::simple(egui::FontId::monospace(size), color),
-    );
-    job.append(
-        " Alternating sides",
-        0.0,
-        egui::TextFormat::simple(egui::FontId::proportional(size), color),
-    );
-    job
 }
 
 fn tone(app: &mut App, ui: &mut egui::Ui) {

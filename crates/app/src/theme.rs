@@ -60,6 +60,27 @@ fn visuals() -> Visuals {
 }
 
 /// A heading for a section of the right panel: small capitals in a dim colour.
+/// Button or label text that starts with an arrow symbol. The arrows are in the monospace font,
+/// because the proportional fonts have no glyph for them. `rest` may be empty.
+pub fn arrow_text(ui: &Ui, arrow: &str, rest: &str) -> egui::text::LayoutJob {
+    let size = TextStyle::Button.resolve(ui.style()).size;
+    let color = Color32::PLACEHOLDER;
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        arrow,
+        0.0,
+        egui::TextFormat::simple(FontId::monospace(size), color),
+    );
+    if !rest.is_empty() {
+        job.append(
+            rest,
+            0.0,
+            egui::TextFormat::simple(FontId::proportional(size), color),
+        );
+    }
+    job
+}
+
 pub fn section(ui: &mut Ui, title: &str) {
     ui.label(RichText::new(title.to_uppercase()).small().color(DIM));
 }
