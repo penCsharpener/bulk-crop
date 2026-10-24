@@ -1,5 +1,6 @@
 //! Hit testing and dragging of the crop frame. All positions are frame fractions.
 
+use crate::geometry::{Size, fit_inside, frame_inside};
 use crate::model::CropRect;
 
 /// The part of the frame under the pointer: the whole frame, one of its four edges or corners.
@@ -106,6 +107,51 @@ pub fn drag(
     }
 }
 
+/// Like `drag`, but the frame also stays inside the turned picture (see `geometry::frame_inside`),
+/// so it never covers the white corners a fine angle leaves. A start frame that is not inside is
+/// fitted first. When the whole movement would leave the picture, the frame goes as far as it can,
+/// then slides along the edge on each axis alone.
+pub fn drag_inside(
+    start: CropRect,
+    handle: Handle,
+    delta: (f32, f32),
+    base: Size,
+    angle_deg: f32,
+    min: (f32, f32),
+) -> CropRect {
+    let start = fit_inside(start, base, angle_deg);
+    let at = |d: (f32, f32)| drag(start, handle, d, (0.5, 0.5), min);
+    let ok = |d: (f32, f32)| frame_inside(at(d), base, angle_deg);
+    if ok(delta) {
+        return at(delta);
+    }
+    let t = furthest(|t| ok((delta.0 * t, delta.1 * t)));
+    let mut reached = (delta.0 * t, delta.1 * t);
+    let tx = furthest(|s| ok((reached.0 + (delta.0 - reached.0) * s, reached.1)));
+    reached.0 += (delta.0 - reached.0) * tx;
+    let ty = furthest(|s| ok((reached.0, reached.1 + (delta.1 - reached.1) * s)));
+    reached.1 += (delta.1 - reached.1) * ty;
+    at(reached)
+}
+
+/// The largest `t` in `0..=1` for which `ok(t)` holds. `ok(0)` must hold, and `ok` may switch from
+/// true to false only once; both are true here because the allowed region is convex.
+fn furthest(ok: impl Fn(f32) -> bool) -> f32 {
+    if ok(1.0) {
+        return 1.0;
+    }
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        if ok(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +232,39 @@ mod tests {
         let d = drag(f, Handle::E, (1.0, 0.0), HALF, MIN);
         let right = d.cx + d.w / 2.0;
         assert!(close(right, 0.5), "right = {right}");
+    }
+
+    fn base_1600() -> Size {
+        Size {
+            w: 1600.0,
+            h: 1200.0,
+        }
+    }
+
+    #[test]
+    fn drag_inside_at_zero_angle_equals_drag() {
+        let f = frame(0.0, 0.0, 0.5, 0.5);
+        let inside = drag_inside(f, Handle::E, (0.3, 0.0), base_1600(), 0.0, MIN);
+        let plain = drag(f, Handle::E, (0.3, 0.0), HALF, MIN);
+        assert!(close(inside.cx, plain.cx) && close(inside.cy, plain.cy));
+        assert!(close(inside.w, plain.w) && close(inside.h, plain.h));
+    }
+
+    #[test]
+    fn drag_inside_stops_at_turned_edge() {
+        let f = frame(0.0, 0.0, 0.5, 0.5);
+        let d = drag_inside(f, Handle::E, (1.0, 0.0), base_1600(), 6.0, MIN);
+        assert!(frame_inside(d, base_1600(), 6.0));
+        let right = d.cx + d.w / 2.0;
+        assert!((right - 0.4831).abs() < 1e-3, "right = {right}");
+    }
+
+    #[test]
+    fn drag_inside_slides_along_edge() {
+        let f = frame(0.3, 0.0, 0.2, 0.2);
+        let d = drag_inside(f, Handle::Move, (0.5, 0.1), base_1600(), 6.0, MIN);
+        assert!(frame_inside(d, base_1600(), 6.0));
+        assert!((d.cx - 0.3935).abs() < 1e-3, "cx = {}", d.cx);
+        assert!((d.cy - 0.0187).abs() < 1e-3, "cy = {}", d.cy);
     }
 }
