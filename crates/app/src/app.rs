@@ -97,6 +97,9 @@ pub const REACH_RANGE: (f32, f32) = (1.0, 15.0);
 /// The key under which the handle reach is stored in eframe's settings.
 const REACH_KEY: &str = "handle_reach_percent";
 
+/// The key under which the folder that was open at the last save is stored in eframe's settings.
+const FOLDER_KEY: &str = "last_folder";
+
 /// How many previews are kept in memory.
 const CACHE_SIZE: usize = 12;
 
@@ -233,7 +236,8 @@ impl App {
         {
             app.handle_reach_percent = p.clamp(REACH_RANGE.0, REACH_RANGE.1);
         }
-        if let Some(dir) = folder {
+        let stored = storage.and_then(|s| eframe::get_value::<String>(s, FOLDER_KEY));
+        if let Some(dir) = startup_folder(folder, stored) {
             app.open_folder(&dir);
         }
         Ok(app)
@@ -926,6 +930,10 @@ fn key_target(input: &egui::InputState, current: usize, last: usize) -> Option<u
 impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, REACH_KEY, &self.handle_reach_percent);
+        // Only a folder that is open is written, so closing with an error keeps the last good one.
+        if let Some(dir) = self.project.as_ref().and_then(|p| p.dir.to_str()) {
+            eframe::set_value(storage, FOLDER_KEY, &dir.to_owned());
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -949,11 +957,55 @@ impl eframe::App for App {
     }
 }
 
+/// The folder to open at start: the one given on the command line, else the one stored by the last
+/// run when it is still a directory.
+fn startup_folder(arg: Option<PathBuf>, stored: Option<String>) -> Option<PathBuf> {
+    arg.or_else(|| stored.map(PathBuf::from).filter(|dir| dir.is_dir()))
+}
+
 /// Copies an unreadable settings file to `pagecrop.json.bak` and says so in a notice.
 fn keep_unreadable_settings(dir: &Path, path: &Path) -> String {
     let backup = dir.join(format!("{SIDECAR_NAME}.bak"));
     match std::fs::copy(path, &backup) {
         Ok(_) => "Settings file was unreadable, kept as pagecrop.json.bak".to_owned(),
         Err(err) => format!("Settings file was unreadable and could not be kept: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A folder that exists, inside the repo.
+    fn existing() -> String {
+        env!("CARGO_MANIFEST_DIR").to_owned()
+    }
+
+    #[test]
+    fn argument_wins_over_stored_folder() {
+        let arg = PathBuf::from("from/the/command/line");
+        assert_eq!(
+            startup_folder(Some(arg.clone()), Some(existing())),
+            Some(arg)
+        );
+    }
+
+    #[test]
+    fn stored_folder_is_used_when_it_exists() {
+        assert_eq!(
+            startup_folder(None, Some(existing())),
+            Some(PathBuf::from(existing()))
+        );
+    }
+
+    #[test]
+    fn missing_stored_folder_is_ignored() {
+        let gone = format!("{}/no-such-folder", existing());
+        assert_eq!(startup_folder(None, Some(gone)), None);
+    }
+
+    #[test]
+    fn nothing_given_gives_nothing() {
+        assert_eq!(startup_folder(None, None), None);
     }
 }
