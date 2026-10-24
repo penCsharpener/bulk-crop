@@ -418,13 +418,24 @@ impl App {
         let Some(project) = &self.project else {
             return String::new();
         };
-        if self.page_has_key() {
-            return "Own settings".to_owned();
+        let base = if self.page_has_key() {
+            "Own settings".to_owned()
+        } else {
+            match project.key_index(self.selected) {
+                Some(k) => format!("Follows page {}", k + 1),
+                None => "Default settings".to_owned(),
+            }
+        };
+        match self.side_label() {
+            Some(side) => format!("{base} · {side}"),
+            None => base,
         }
-        match project.key_index(self.selected) {
-            Some(k) => format!("Follows page {}", k + 1),
-            None => "Default settings".to_owned(),
-        }
+    }
+
+    /// "side A" or "side B" when the selected page alternates, else None.
+    pub fn side_label(&self) -> Option<&'static str> {
+        let side = self.project.as_ref()?.side(self.selected)?;
+        Some(if side == 0 { "side A" } else { "side B" })
     }
 
     /// Starts an edit: remembers the settings of the selected page as they are before the change.
