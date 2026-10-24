@@ -1,6 +1,8 @@
 //! Central area: the selected page turned by its settings, with its crop frame on top.
 
-use pagecrop_core::crop_edit::{Handle, drag_inside, handle_reach, hit_test, spin_angle};
+use pagecrop_core::crop_edit::{
+    Handle, drag_inside, handle_reach, hit_test, spin_angle, spin_reach,
+};
 use pagecrop_core::geometry::{Resize, Size, base_size};
 use pagecrop_core::model::{Adjust, CropRect};
 use pagecrop_core::render::render;
@@ -17,12 +19,13 @@ const MAX_ZOOM: f32 = 8.0;
 const HANDLE_SIZE: f32 = 9.0;
 /// The radius of a spin handle's dot, in screen points.
 const SPIN_RADIUS: f32 = 5.0;
-/// How close the pointer must be to a spin handle's dot, in screen points.
+/// The least distance from a spin handle's dot at which the pointer is on it, in screen points. The
+/// "Handle reach" setting can make it larger.
 const SPIN_REACH: f32 = 10.0;
 /// The nearest a spin handle sits to the frame edge, in screen points.
 const SPIN_MIN_DISTANCE: f32 = 28.0;
-/// How far a spin handle sits beyond the frame handles' reach, in screen points.
-const SPIN_CLEARANCE: f32 = 14.0;
+/// The gap between a spin handle's grab circle and the frame handles' reach, in screen points.
+const SPIN_GAP: f32 = 4.0;
 /// How near the canvas edge a spin handle is pulled back to, in screen points.
 const SPIN_MARGIN: f32 = 10.0;
 /// The fine angle's range in degrees, the same as the slider's.
@@ -77,7 +80,7 @@ fn canvas(app: &mut App, ui: &mut egui::Ui, texture: &egui::TextureHandle) {
     let painter = ui.painter_at(area);
     paint_picture(&painter, &texture, adjust, &layout);
     paint_frame(&painter, &layout, area, adjust.crop, app.show_grid);
-    let dots = spin_positions(app, &layout, area, adjust.crop);
+    let (dots, _) = spin_positions(app, &layout, area, adjust.crop);
     paint_spin_handles(&painter, layout.frame_rect(adjust.crop), dots);
     if let Some(label) = app.side_label() {
         paint_side_badge(&painter, area, label);
@@ -296,10 +299,11 @@ fn paint_frame(
 }
 
 /// Where the two spin handles are: the left and the right of the frame, at its vertical middle.
-/// Each is `max(28, reach_x + 14)` points from its edge, so it lies beyond the E and W handles'
-/// reach (`reach_x`, in points). A dot that would leave `area` is pulled back to 10 points inside.
-fn spin_dots(frame: egui::Rect, reach_x: f32, area: egui::Rect) -> [egui::Pos2; 2] {
-    let distance = SPIN_MIN_DISTANCE.max(reach_x + SPIN_CLEARANCE);
+/// Each is `max(28, reach_x + radius + 4)` points from its edge, so its grab circle (`radius`) lies
+/// beyond the E and W handles' reach (`reach_x`, in points). A dot that would leave `area` is pulled
+/// back to 10 points inside.
+fn spin_dots(frame: egui::Rect, reach_x: f32, radius: f32, area: egui::Rect) -> [egui::Pos2; 2] {
+    let distance = SPIN_MIN_DISTANCE.max(reach_x + radius + SPIN_GAP);
     let y = frame.center().y;
     let (lo, hi) = (area.min.x + SPIN_MARGIN, area.max.x - SPIN_MARGIN);
     [
@@ -308,20 +312,43 @@ fn spin_dots(frame: egui::Rect, reach_x: f32, area: egui::Rect) -> [egui::Pos2; 
     ]
 }
 
+/// The grab radius of each spin handle. It is `radius`, but where the dot was pulled back towards
+/// its edge it shrinks to leave `SPIN_GAP` points before the frame edge, so the edge itself always
+/// belongs to the E or W handle; it is never less than `SPIN_REACH`.
+fn spin_radii(frame: egui::Rect, dots: [egui::Pos2; 2], radius: f32) -> [f32; 2] {
+    let room = |dot: egui::Pos2, edge: f32| (dot.x - edge).abs() - SPIN_GAP;
+    [
+        radius.min(room(dots[0], frame.min.x).max(SPIN_REACH)),
+        radius.min(room(dots[1], frame.max.x).max(SPIN_REACH)),
+    ]
+}
+
 /// Clamps `v` into `lo..=hi`; unlike `f32::clamp` it never panics on a tiny area where `lo > hi`.
 fn clamp_range(v: f32, lo: f32, hi: f32) -> f32 {
     v.max(lo).min(hi)
 }
 
-/// The spin handles of the current frame and handle reach.
-fn spin_positions(app: &App, layout: &Layout, area: egui::Rect, crop: CropRect) -> [egui::Pos2; 2] {
-    let reach_x = reach(layout, crop, app.handle_reach_percent).0 * layout.base_points().x;
-    spin_dots(layout.frame_rect(crop), reach_x, area)
+/// The spin handles of the current frame and handle reach, and the radius in points around each
+/// within which the pointer is on it.
+fn spin_positions(
+    app: &App,
+    layout: &Layout,
+    area: egui::Rect,
+    crop: CropRect,
+) -> ([egui::Pos2; 2], [f32; 2]) {
+    let base = layout.base_points();
+    let radius = spin_reach((base.x, base.y), app.handle_reach_percent, SPIN_REACH);
+    let reach_x = reach(layout, crop, app.handle_reach_percent).0 * base.x;
+    let frame = layout.frame_rect(crop);
+    let dots = spin_dots(frame, reach_x, radius, area);
+    (dots, spin_radii(frame, dots, radius))
 }
 
-/// Whether `pos` is on one of the spin handles.
-fn on_spin_dot(dots: [egui::Pos2; 2], pos: egui::Pos2) -> bool {
-    dots.iter().any(|dot| dot.distance(pos) <= SPIN_REACH)
+/// Whether `pos` is within the radius of one of the spin handles.
+fn on_spin_dot(dots: [egui::Pos2; 2], radii: [f32; 2], pos: egui::Pos2) -> bool {
+    dots.iter()
+        .zip(radii)
+        .any(|(dot, radius)| dot.distance(pos) <= radius)
 }
 
 /// The two spin handles: a dot on each side of the frame, joined to the middle of that edge by a
@@ -424,7 +451,7 @@ fn view_input(
     crop: CropRect,
 ) {
     let mut changed = false;
-    let dots = spin_positions(app, layout, response.rect, crop);
+    let (dots, radii) = spin_positions(app, layout, response.rect, crop);
     let scroll = if response.hovered() {
         ui.input(|i| i.smooth_scroll_delta.y)
     } else {
@@ -441,7 +468,7 @@ fn view_input(
         changed = true;
     }
     let on_handle = response.hover_pos().is_some_and(|pos| {
-        on_spin_dot(dots, pos)
+        on_spin_dot(dots, radii, pos)
             || hit_test(
                 crop,
                 layout.to_frame(pos),
@@ -491,11 +518,11 @@ fn handle_pointer(
         .and_then(|pos| hit_test(adjust.crop, layout.to_frame(pos), reach));
     // Space turns a left drag into a pan, so it never starts a handle or spin drag.
     let space = ui.input(|i| i.key_down(egui::Key::Space));
-    let dots = spin_positions(app, layout, response.rect, adjust.crop);
+    let (dots, radii) = spin_positions(app, layout, response.rect, adjust.crop);
     let on_spin = !space
         && response
             .hover_pos()
-            .is_some_and(|pos| on_spin_dot(dots, pos));
+            .is_some_and(|pos| on_spin_dot(dots, radii, pos));
     // Left alone when nothing is under the pointer, so other panels keep their own cursors.
     if app.spin.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -509,7 +536,7 @@ fn handle_pointer(
         let press = ui.input(|i| i.pointer.press_origin());
         if let Some(press) = press {
             // The spin handles are checked before the frame.
-            if on_spin_dot(dots, press) {
+            if on_spin_dot(dots, radii, press) {
                 app.spin = Some(SpinDrag {
                     start_deg: adjust.angle_deg,
                     press,
@@ -596,7 +623,7 @@ mod tests {
 
     #[test]
     fn dots_sit_at_the_vertical_middle_outside_the_edges() {
-        let [left, right] = spin_dots(frame(), 10.0, area());
+        let [left, right] = spin_dots(frame(), 10.0, 10.0, area());
         assert!((left.x - 272.0).abs() < 1e-3, "left = {left:?}");
         assert!((right.x - 728.0).abs() < 1e-3, "right = {right:?}");
         assert!((left.y - 300.0).abs() < 1e-3 && (right.y - 300.0).abs() < 1e-3);
@@ -604,15 +631,48 @@ mod tests {
 
     #[test]
     fn dots_stay_beyond_a_wide_reach() {
-        let [left, right] = spin_dots(frame(), 60.0, area());
+        let [left, right] = spin_dots(frame(), 60.0, 10.0, area());
         assert!((left.x - 226.0).abs() < 1e-3, "left = {left:?}");
         assert!((right.x - 774.0).abs() < 1e-3, "right = {right:?}");
     }
 
     #[test]
+    fn dots_move_out_with_the_grab_radius() {
+        let [left, right] = spin_dots(frame(), 30.0, 30.0, area());
+        assert!((left.x - 236.0).abs() < 1e-3, "left = {left:?}");
+        assert!((right.x - 764.0).abs() < 1e-3, "right = {right:?}");
+    }
+
+    #[test]
+    fn radius_stays_whole_where_the_dot_is_not_pulled_in() {
+        let dots = spin_dots(frame(), 30.0, 30.0, area());
+        let radii = spin_radii(frame(), dots, 30.0);
+        assert!(radii.iter().all(|r| (r - 30.0).abs() < 1e-3), "{radii:?}");
+    }
+
+    #[test]
+    fn radius_stops_short_of_the_frame_edge() {
+        // A dot 50 points from its edge leaves 46 before the edge, with a gap of 4.
+        let dots = [egui::pos2(250.0, 300.0), egui::pos2(750.0, 300.0)];
+        let radii = spin_radii(frame(), dots, 60.0);
+        assert!(radii.iter().all(|r| (r - 46.0).abs() < 1e-3), "{radii:?}");
+    }
+
+    #[test]
+    fn radius_never_drops_below_the_floor() {
+        let wide = egui::Rect::from_min_max(egui::pos2(5.0, 100.0), egui::pos2(995.0, 500.0));
+        let dots = spin_dots(wide, 30.0, 30.0, area());
+        let radii = spin_radii(wide, dots, 30.0);
+        assert!(
+            radii.iter().all(|r| (r - SPIN_REACH).abs() < 1e-3),
+            "{radii:?}"
+        );
+    }
+
+    #[test]
     fn dots_are_pulled_back_into_the_canvas() {
         let wide = egui::Rect::from_min_max(egui::pos2(5.0, 100.0), egui::pos2(995.0, 500.0));
-        let [left, right] = spin_dots(wide, 10.0, area());
+        let [left, right] = spin_dots(wide, 10.0, 10.0, area());
         assert!((left.x - 10.0).abs() < 1e-3, "left = {left:?}");
         assert!((right.x - 990.0).abs() < 1e-3, "right = {right:?}");
     }
