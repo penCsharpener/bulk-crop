@@ -3,6 +3,7 @@
 
 pub mod crop_edit;
 pub mod decode;
+pub mod delete;
 pub mod encode;
 pub mod error;
 pub mod export;

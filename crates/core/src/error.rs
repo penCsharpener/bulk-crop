@@ -14,6 +14,8 @@ pub enum CoreError {
     Sidecar { path: PathBuf, message: String },
     #[error("the output folder is the photo folder: {}", path.display())]
     OutDirIsSource { path: PathBuf },
+    #[error("cannot move {} to the trash: {message}", path.display())]
+    Trash { path: PathBuf, message: String },
     #[error("cannot start worker threads: {0}")]
     Threads(String),
 }

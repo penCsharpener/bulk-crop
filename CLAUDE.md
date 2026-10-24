@@ -83,8 +83,9 @@ cargo test --workspace
 
 ## Data that must not be lost
 
-- Original photos are read-only. The app writes into the export folder and writes `pagecrop.json` into
-  the photo folder. It writes nothing else there, ever.
+- Original photos are never written to. The only exception is the bin button: after the user confirms, it moves one photo to the desktop trash with `delete::move_to_trash`. Nothing else may delete, move or change a photo.
+- The app writes into the export folder and writes `pagecrop.json` into the photo folder. It writes nothing
+  else there, ever.
 - `pagecrop.json` holds the user's adjustments. Save it by writing a temporary file and renaming it.
 
 ## Commits
