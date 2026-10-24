@@ -1,6 +1,6 @@
 //! Central area: the selected page turned by its settings, with its crop frame on top.
 
-use pagecrop_core::crop_edit::{Handle, drag_inside, hit_test};
+use pagecrop_core::crop_edit::{Handle, drag_inside, handle_reach, hit_test};
 use pagecrop_core::geometry::{Resize, Size, base_size};
 use pagecrop_core::model::{Adjust, CropRect};
 use pagecrop_core::render::render;
@@ -324,10 +324,12 @@ fn cursor_for(handle: Handle) -> egui::CursorIcon {
     }
 }
 
-/// How close the pointer must be to a handle, as fractions of the base picture.
-fn reach(layout: &Layout) -> (f32, f32) {
+/// How close the pointer must be to a handle, as fractions of the base picture: the user's setting,
+/// but never less than `HANDLE_REACH` screen points.
+fn reach(layout: &Layout, crop: CropRect, percent: f32) -> (f32, f32) {
     let base = layout.base_points();
-    (HANDLE_REACH / base.x, HANDLE_REACH / base.y)
+    let floor = (HANDLE_REACH / base.x, HANDLE_REACH / base.y);
+    handle_reach(layout.base, crop, percent, floor)
 }
 
 /// Wheel zoom around the pointer, and pan with the middle button or with Space and the left button.
@@ -357,7 +359,13 @@ fn view_input(
     }
     let on_handle = response
         .hover_pos()
-        .and_then(|pos| hit_test(crop, layout.to_frame(pos), reach(layout)))
+        .and_then(|pos| {
+            hit_test(
+                crop,
+                layout.to_frame(pos),
+                reach(layout, crop, app.handle_reach_percent),
+            )
+        })
         .is_some();
     if response.double_clicked() && !on_handle {
         app.reset_view();
@@ -395,7 +403,7 @@ fn handle_pointer(
     layout: &Layout,
     adjust: Adjust,
 ) {
-    let reach = reach(layout);
+    let reach = reach(layout, adjust.crop, app.handle_reach_percent);
     let hover = response
         .hover_pos()
         .and_then(|pos| hit_test(adjust.crop, layout.to_frame(pos), reach));

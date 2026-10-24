@@ -25,7 +25,11 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(app::App::new(cc.egui_ctx.clone(), folder)?))
+            Ok(Box::new(app::App::new(
+                cc.egui_ctx.clone(),
+                folder,
+                cc.storage,
+            )?))
         }),
     )
 }

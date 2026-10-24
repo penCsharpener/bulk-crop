@@ -3,7 +3,7 @@
 use pagecrop_core::geometry::quarter_turn;
 use pagecrop_core::model::Adjust;
 
-use crate::app::App;
+use crate::app::{App, REACH_RANGE};
 use crate::theme;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -114,6 +114,15 @@ fn view(app: &mut App, ui: &mut egui::Ui) {
     theme::section(ui, "View");
     ui.checkbox(&mut app.show_grid, "Grid");
     ui.checkbox(&mut app.show_result, "Show result");
+    ui.add(
+        egui::Slider::new(&mut app.handle_reach_percent, REACH_RANGE.0..=REACH_RANGE.1)
+            .step_by(0.5)
+            .suffix(" %")
+            .text("Handle reach"),
+    )
+    .on_hover_text(
+        "How close the pointer must be to an edge or corner of the frame, as a share of the picture",
+    );
 }
 
 fn page(app: &mut App, ui: &mut egui::Ui) {
