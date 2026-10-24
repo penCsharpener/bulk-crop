@@ -167,6 +167,30 @@ fn furthest(ok: impl Fn(f32) -> bool) -> f32 {
     lo
 }
 
+/// The fine angle after dragging a spin handle from `press` to `now` (screen points), turning about
+/// `centre`. The change is the angle the pointer swept around the centre: on the right of the centre,
+/// moving down turns clockwise, which is positive. The result is rounded to 0.1° and kept within
+/// `-limit..=limit`.
+pub fn spin_angle(
+    start_deg: f32,
+    centre: (f32, f32),
+    press: (f32, f32),
+    now: (f32, f32),
+    limit: f32,
+) -> f32 {
+    let before = (press.1 - centre.1).atan2(press.0 - centre.0);
+    let after = (now.1 - centre.1).atan2(now.0 - centre.0);
+    let mut swept = (after - before).to_degrees();
+    // atan2 jumps by 360° where the pointer crosses the left of the centre.
+    if swept > 180.0 {
+        swept -= 360.0;
+    } else if swept < -180.0 {
+        swept += 360.0;
+    }
+    let angle = ((start_deg + swept) * 10.0).round() / 10.0;
+    angle.clamp(-limit, limit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +336,43 @@ mod tests {
         let f = frame(0.1, -0.1, 0.4, 0.4);
         let reach = handle_reach(base_1600(), f, 15.0, (0.0, 0.0));
         assert_eq!(hit_test(f, (0.1, -0.1), reach), Some(Handle::Move));
+    }
+
+    const ORIGIN: (f32, f32) = (0.0, 0.0);
+
+    #[test]
+    fn right_handle_down_turns_clockwise() {
+        let a = spin_angle(0.0, ORIGIN, (100.0, 0.0), (100.0, 10.0), 15.0);
+        assert!((a - 5.7).abs() < 1e-4, "a = {a}");
+    }
+
+    #[test]
+    fn left_handle_up_turns_clockwise() {
+        let a = spin_angle(0.0, ORIGIN, (-100.0, 0.0), (-100.0, -10.0), 15.0);
+        assert!((a - 5.7).abs() < 1e-4, "a = {a}");
+    }
+
+    #[test]
+    fn crossing_the_left_does_not_jump() {
+        let a = spin_angle(0.0, ORIGIN, (-100.0, 1.0), (-100.0, -1.0), 15.0);
+        assert!((a - 1.1).abs() < 1e-4, "a = {a}");
+    }
+
+    #[test]
+    fn result_is_rounded_to_a_tenth() {
+        let a = spin_angle(0.37, ORIGIN, (100.0, 0.0), (100.0, 3.3), 15.0);
+        assert!((a * 10.0 - (a * 10.0).round()).abs() < 1e-3, "a = {a}");
+    }
+
+    #[test]
+    fn result_is_clamped() {
+        let a = spin_angle(0.0, ORIGIN, (100.0, 0.0), (0.0, 100.0), 15.0);
+        assert!((a - 15.0).abs() < 1e-4, "a = {a}");
+    }
+
+    #[test]
+    fn no_movement_keeps_start() {
+        let a = spin_angle(2.3, ORIGIN, (100.0, 40.0), (100.0, 40.0), 15.0);
+        assert!((a - 2.3).abs() < 1e-4, "a = {a}");
     }
 }
