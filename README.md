@@ -48,7 +48,9 @@ cp assets/pagecrop.png ~/.local/share/icons/hicolor/64x64/apps/
    settings. Press N to jump to that page.
 5. **Check and correct.** Press P to see the result as it will be exported. Ctrl+Z takes back the last
    change, and Ctrl+Shift+Z or Ctrl+Y brings it back. Delete resets the page to the settings before it.
-6. **Export.** Click Export… or press Ctrl+E. The output folder defaults to a `cropped` folder inside
+6. **Remove bad shots.** The bin button (or Shift+Delete) moves the selected photo to the desktop trash,
+   after you confirm. Restore it from the trash with your file manager. Undo is cleared by this.
+7. **Export.** Click Export… or press Ctrl+E. The output folder defaults to a `cropped` folder inside
    the photo folder. Choose the long edge (1600 pixels is the default), or keep the cropped size, or
    shrink by a percentage. Quality is 90 by default. Click Start, and watch the progress. Cancel stops
    the export; pictures already written stay. Existing files are skipped unless you tick Replace
@@ -66,6 +68,7 @@ cp assets/pagecrop.png ~/.local/share/icons/hicolor/64x64/apps/
 | [ and ] | Fine angle −0.1°, +0.1° |
 | Shift+[ and Shift+] | Fine angle −1°, +1° |
 | Delete | Reset the page to the settings before it |
+| Shift+Delete | Move the photo to the trash |
 | G | Show or hide the grid |
 | P | Show the result, or the frame again |
 | 0 | Fit the picture to the window |
@@ -93,8 +96,10 @@ under a temporary name first, so an interrupted save does not damage it. It hold
   and `h` as fractions of the picture), `brightness`, `contrast` and `grayscale`.
 - `export`: the output folder and the export options last used.
 
-Settings for photos that are no longer in the folder are kept in the file, so removing a photo does
-not lose them. A renamed photo does not get its settings back, because they are stored by file name.
+Settings for photos that are no longer in the folder are kept in the file, so removing a photo outside
+pagecrop does not lose them. A photo moved to the trash with the bin button takes its settings with
+it; if the page after it has none of its own, that page gets them, so it looks the same. A renamed
+photo does not get its settings back, because they are stored by file name.
 Your photos are never changed. The only exception is the bin button: after you confirm, it moves one
 photo to the desktop trash, from where you can restore it. pagecrop writes only `pagecrop.json` in the
 photo folder, and the pictures into the export folder, which it creates only when you start an export.

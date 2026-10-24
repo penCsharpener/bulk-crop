@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use image::RgbImage;
 use pagecrop_core::crop_edit::Handle;
+use pagecrop_core::delete::move_to_trash;
 use pagecrop_core::error::CoreError;
 use pagecrop_core::geometry::{Size, base_size, fit_inside, quarter_turn};
 use pagecrop_core::history::{Edit, History};
@@ -41,6 +42,13 @@ pub struct App {
     last_requested: Option<(u64, usize)>,
     /// A sort waiting for the user to confirm it, because pages have their own settings.
     pending_sort: Option<SortBy>,
+    /// A move to the trash waiting for the user to confirm it.
+    pending_delete: bool,
+    /// Whether moving a photo to the trash asks first. Starts true and is not saved, so every run of
+    /// the app asks again.
+    ask_before_delete: bool,
+    /// The "Don't ask again" box in the open question. It only takes effect on Move to trash.
+    delete_dont_ask: bool,
     /// The crop-frame drag in progress, if any.
     pub drag: Option<Drag>,
     /// Whether a grid is drawn over the crop frame.
@@ -187,6 +195,9 @@ impl App {
             previews: PreviewCache::default(),
             last_requested: None,
             pending_sort: None,
+            pending_delete: false,
+            ask_before_delete: true,
+            delete_dont_ask: false,
             drag: None,
             show_grid: false,
             show_result: false,
@@ -587,6 +598,108 @@ impl App {
         self.save_settings();
     }
 
+    /// Moves the selected photo to the trash now, or asks first unless the user switched the
+    /// question off.
+    pub fn request_delete(&mut self) {
+        if self.page_count() == 0 {
+            return;
+        }
+        if self.ask_before_delete {
+            self.delete_dont_ask = false;
+            self.pending_delete = true;
+        } else {
+            self.delete_selected();
+        }
+    }
+
+    /// The question shown before a photo goes to the trash.
+    fn confirm_delete(&mut self, ctx: &egui::Context) {
+        if !self.pending_delete {
+            return;
+        }
+        let name = self
+            .project
+            .as_ref()
+            .and_then(|p| p.entries.get(self.selected))
+            .map(|e| e.file_name.clone());
+        let Some(name) = name else {
+            self.pending_delete = false;
+            return;
+        };
+        let mut answer = ctx
+            .input(|input| input.key_pressed(egui::Key::Escape))
+            .then_some(false);
+        egui::Window::new("Move to trash")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!("Move {name} to the trash?"));
+                ui.label("This also clears undo.");
+                ui.checkbox(
+                    &mut self.delete_dont_ask,
+                    "Don't ask again until the app closes",
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Move to trash").clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+        match answer {
+            Some(true) => {
+                self.pending_delete = false;
+                if self.delete_dont_ask {
+                    self.ask_before_delete = false;
+                }
+                self.delete_selected();
+            }
+            Some(false) => self.pending_delete = false,
+            None => {}
+        }
+    }
+
+    /// Moves the selected photo to the desktop trash and takes its page out of the list. When the
+    /// trash refuses, the message goes to the status bar and nothing else changes.
+    pub fn delete_selected(&mut self) {
+        let selected = self.selected;
+        let Some(path) = self
+            .project
+            .as_ref()
+            .and_then(|p| p.entries.get(selected))
+            .map(|e| e.path.clone())
+        else {
+            return;
+        };
+        if let Err(err) = move_to_trash(&path) {
+            self.error = Some(err.to_string());
+            return;
+        }
+        self.error = None;
+        if let Some(project) = self.project.as_mut() {
+            project.remove_page(selected);
+        }
+        if selected < self.thumbs.len() {
+            self.thumbs.remove(selected);
+        }
+        // The history names pages by index, and a delete moves them, so it is forgotten.
+        self.history.clear();
+        self.edit_start = None;
+        self.drag = None;
+        // Previews are cached and still on their way by old index, so they are dropped.
+        self.preview_generation += 1;
+        self.previews.clear();
+        self.last_requested = None;
+        self.result = None;
+        self.tone = None;
+        self.select(self.selected);
+        self.reveal_selected = true;
+        self.save_settings();
+    }
+
     /// Asks for a folder in the file dialog and opens it.
     pub fn choose_folder(&mut self) {
         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
@@ -666,6 +779,10 @@ impl App {
         if ctx.egui_wants_keyboard_input() {
             return;
         }
+        // The question about the trash is answered with its buttons or Escape only.
+        if self.pending_delete {
+            return;
+        }
         let pressed = |key: egui::Key| ctx.input(|input| input.key_pressed(key));
         let modifiers = ctx.input(|input| input.modifiers);
         let plain = !modifiers.command && !modifiers.alt;
@@ -714,7 +831,8 @@ impl App {
     }
 
     /// The keys that change the settings of the selected page: R turns it, [ and ] move the fine
-    /// angle (Shift for whole degrees), and Delete resets the page.
+    /// angle (Shift for whole degrees), Delete resets the page and Shift+Delete moves the photo to
+    /// the trash.
     fn edit_keys(&mut self, pressed: &dyn Fn(egui::Key) -> bool, shift: bool) {
         if pressed(egui::Key::R) {
             self.turn(!shift);
@@ -727,8 +845,12 @@ impl App {
         if pressed(egui::Key::CloseBracket) || pressed(egui::Key::CloseCurlyBracket) {
             self.nudge_angle(step);
         }
-        if pressed(egui::Key::Delete) && self.page_has_key() {
-            self.reset_page();
+        if pressed(egui::Key::Delete) {
+            if shift {
+                self.request_delete();
+            } else if self.page_has_key() {
+                self.reset_page();
+            }
         }
     }
 }
@@ -792,9 +914,10 @@ impl eframe::App for App {
         self.take_thumbs(ui.ctx());
         self.request_preview_if_changed();
         self.confirm_sort(ui.ctx());
+        self.confirm_delete(ui.ctx());
         self.take_export_messages();
         let running = self.export_dialog.is_running();
-        ui.add_enabled_ui(!running, |ui| {
+        ui.add_enabled_ui(!running && !self.pending_delete, |ui| {
             panels::top::show(self, ui);
             panels::status::show(self, ui);
             panels::pages::show(self, ui);

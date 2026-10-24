@@ -31,6 +31,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 app.redo();
             }
             ui.separator();
+            let can_delete = app.page_count() > 0 && !app.editing();
+            if ui
+                .add_enabled(can_delete, egui::Button::new("🗑"))
+                .on_hover_text("Move this photo to the trash")
+                .clicked()
+            {
+                app.request_delete();
+            }
+            ui.separator();
             let current = app.project.as_ref().map(|p| p.sort);
             for (label, by) in [("Name", SortBy::Name), ("Date", SortBy::Date)] {
                 if ui.selectable_label(current == Some(by), label).clicked() {

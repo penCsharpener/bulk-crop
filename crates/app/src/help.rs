@@ -13,6 +13,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("[ and ]", "Fine angle −0.1°, +0.1°"),
     ("Shift+[ and Shift+]", "Fine angle −1°, +1°"),
     ("Delete", "Reset the page to the settings before it"),
+    ("Shift+Delete", "Move the photo to the trash"),
     ("G", "Show or hide the grid"),
     ("P", "Show the result, or the frame again"),
     ("0", "Fit the picture to the window"),
