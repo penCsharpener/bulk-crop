@@ -1,7 +1,7 @@
 //! Central area: the selected page turned by its settings, with its crop frame on top.
 
-use pagecrop_core::crop_edit::{Handle, drag as drag_frame, hit_test};
-use pagecrop_core::geometry::{Resize, Size, base_size, half_extents};
+use pagecrop_core::crop_edit::{Handle, drag_inside, hit_test};
+use pagecrop_core::geometry::{Resize, Size, base_size};
 use pagecrop_core::model::{Adjust, CropRect};
 use pagecrop_core::render::render;
 
@@ -195,6 +195,11 @@ impl Layout {
         egui::pos2(self.centre.x + x * b.x, self.centre.y + y * b.y)
     }
 
+    /// The upright rectangle of the base picture on screen: where the turned picture is clipped.
+    fn base_rect(&self) -> egui::Rect {
+        egui::Rect::from_center_size(self.centre, self.base_points())
+    }
+
     /// The crop frame as an upright rectangle on screen.
     fn frame_rect(&self, crop: CropRect) -> egui::Rect {
         egui::Rect::from_min_max(
@@ -204,13 +209,15 @@ impl Layout {
     }
 }
 
-/// Draws the picture turned by its settings. The fine angle turns it further.
+/// Draws the picture turned by its settings. The fine angle turns it further. The picture is cut at
+/// the upright base rectangle, and the wedges the turn leaves there are white, as in the export.
 fn paint_picture(
     painter: &egui::Painter,
     texture: &egui::TextureHandle,
     adjust: Adjust,
     layout: &Layout,
 ) {
+    painter.rect_filled(layout.base_rect(), 0.0, egui::Color32::WHITE);
     let rect = egui::Rect::from_center_size(layout.centre, layout.texture * layout.scale);
     let full_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     let mut mesh = egui::Mesh::with_texture(texture.id());
@@ -220,7 +227,9 @@ fn paint_picture(
         egui::emath::Rot2::from_angle(degrees.to_radians()),
         layout.centre,
     );
-    painter.add(egui::Shape::mesh(mesh));
+    painter
+        .with_clip_rect(layout.base_rect())
+        .add(egui::Shape::mesh(mesh));
 }
 
 /// Shades what lies outside the frame and draws the frame, its handles and the optional grid.
@@ -418,8 +427,14 @@ fn handle_pointer(
     {
         let now = layout.to_frame(pos);
         let delta = (now.0 - drag.press.0, now.1 - drag.press.1);
-        let half = half_extents(layout.base, adjust.angle_deg);
-        let crop = drag_frame(drag.start, drag.handle, delta, half, MIN_FRAME);
+        let crop = drag_inside(
+            drag.start,
+            drag.handle,
+            delta,
+            layout.base,
+            adjust.angle_deg,
+            MIN_FRAME,
+        );
         app.apply_edit(Adjust { crop, ..adjust });
     }
     if response.drag_stopped() && app.drag.take().is_some() {
