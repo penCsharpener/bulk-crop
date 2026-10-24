@@ -1,4 +1,5 @@
 //! Desktop window for pagecrop. All image work lives in `pagecrop-core`.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod app;
 mod editor;
