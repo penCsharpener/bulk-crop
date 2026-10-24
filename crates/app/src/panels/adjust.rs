@@ -194,7 +194,7 @@ fn view(app: &mut App, ui: &mut egui::Ui) {
             .text("Handle reach"),
     )
     .on_hover_text(
-        "How close the pointer must be to an edge or corner of the frame, as a share of the picture",
+        "How close the pointer must be to an edge or corner of the frame, or to a round turn handle, as a share of the picture",
     );
 }
 

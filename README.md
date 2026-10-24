@@ -60,10 +60,11 @@ top bar.
 4. **Set the frame, the turn, the angle and the tone.** Drag the handles of the frame to crop. Turn with
    R (Shift+R turns the other way) or the ⟲ and ⟳ buttons. Set the fine angle with [ and ] or the
    slider, or drag a round handle beside the left or right edge of the frame to turn the picture in
-   0.1° steps. Brightness, contrast and greyscale are in the Tone section, where the last three tone
-   settings stay as buttons: one click puts a setting back. The page now has its own
-   settings, shown by a dot in the page list. Later pages follow it until the next page with its own
-   settings. Press N to jump to that page.
+   0.1° steps. The Handle reach slider in the View section sets how close the pointer must be to grab
+   a frame handle or a round turn handle. Brightness, contrast and greyscale are in the Tone section,
+   where the last three tone settings stay as buttons: one click puts a setting back. The page now has
+   its own settings, shown by a dot in the page list. Later pages follow it until the next page with
+   its own settings. Press N to jump to that page.
 5. **Check and correct.** Press P to see the result as it will be exported. Ctrl+Z takes back the last
    change, and Ctrl+Shift+Z or Ctrl+Y brings it back. Delete resets the page to the settings before it.
 6. **Remove bad shots.** The bin button (or Shift+Delete) moves the selected photo to the desktop trash,

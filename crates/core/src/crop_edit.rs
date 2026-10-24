@@ -167,6 +167,14 @@ fn furthest(ok: impl Fn(f32) -> bool) -> f32 {
     lo
 }
 
+/// How close the pointer must be to a spin handle's dot, in screen points: `percent` per cent of the
+/// base picture's shorter side as it is drawn (`base_points`, width and height), and never less
+/// than `floor`. It is the distance the frame handles reach, without their cap at a third of the
+/// frame, so one setting controls both.
+pub fn spin_reach(base_points: (f32, f32), percent: f32, floor: f32) -> f32 {
+    (percent / 100.0 * base_points.0.min(base_points.1)).max(floor)
+}
+
 /// The fine angle after dragging a spin handle from `press` to `now` (screen points), turning about
 /// `centre`. The change is the angle the pointer swept around the centre: on the right of the centre,
 /// moving down turns clockwise, which is positive. The result is rounded to 0.1° and kept within
@@ -194,6 +202,17 @@ pub fn spin_angle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spin_reach_is_a_share_of_the_shorter_side() {
+        assert!(close(spin_reach((800.0, 600.0), 5.0, 10.0), 30.0));
+        assert!(close(spin_reach((600.0, 800.0), 5.0, 10.0), 30.0));
+    }
+
+    #[test]
+    fn spin_reach_never_below_the_floor() {
+        assert!(close(spin_reach((800.0, 600.0), 1.0, 10.0), 10.0));
+    }
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4

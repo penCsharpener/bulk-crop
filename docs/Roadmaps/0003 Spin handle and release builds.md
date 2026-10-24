@@ -20,10 +20,12 @@ turned picture" and snippet S2 first.
   sits at the frame's vertical middle, outside the left and the right edge. A thin line joins each dot
   to the edge.
 - The distance from the edge is `max(28, reach_x + 14)` screen points, where `reach_x` is the handle reach
-  of 0002.3 in points. Keeping the dot beyond the reach zone means it never overlaps the E or W handle.
+  of 0002.3 in points (since 0004.3: `max(28, reach_x + radius + 4)`, with the grab radius below).
+  Keeping the dot beyond the reach zone means it never overlaps the E or W handle.
   When that position falls outside the canvas area, the dot is pulled back inside it, 10 points from the
   canvas edge.
-- The pointer is on a spin handle when it is within 10 points of the dot. Spin handles are checked
+- The pointer is on a spin handle when it is within 10 points of the dot (since 0004.3: within
+  `spin_reach`, which grows with the "Handle reach" setting and is never below 10). Spin handles are checked
   **before** the frame's `hit_test`.
 - While the pointer is on a spin handle or spinning, the cursor is `Grab`, and `Grabbing` while
   dragging.
