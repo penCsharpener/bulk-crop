@@ -116,6 +116,19 @@ half_y = (wb * |sin a| + hb * |cos a|) / (2 * hb)
 Frame edges are clamped to `-half_x ..= half_x` and `-half_y ..= half_y` while dragging. Parts of the
 frame outside the photo come out white.
 
+## Frame stays inside
+
+The picture after its quarter turns is the base. The fine angle turns it about its centre, and on
+screen it is clipped to the upright base rectangle. The frame, in fractions of the base, must lie inside
+both:
+
+1. the upright base rectangle: every corner has `|x| <= 0.5` and `|y| <= 0.5`, and
+2. the turned picture: every corner, turned back by the fine angle, lies within the base rectangle.
+
+Use `geometry::{point_inside, frame_inside, fit_inside}` and `crop_edit::drag_inside`. `fit_inside`
+shrinks about the frame's centre and never grows it. The turn back is the formula of `frame_to_src` with
+only the fine angle; do not write a second version. `half_extents` is no longer used for dragging.
+
 ## Screen and frame space in the editor
 
 `zoom` is screen points per base pixel. `c` is the screen position of the image centre.

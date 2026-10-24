@@ -90,7 +90,7 @@ where the code lists every field on purpose.
 | Module | Row | Item |
 |---|---|---|
 | `tone.rs` | 0002.1 | `lut` keeps its signature; its formula changes to a gamma curve |
-| `geometry.rs` | 0002.2 | `point_inside`, `frame_inside`, `fit_inside` |
+| `geometry.rs` | ✅ 0002.2 | `point_inside`, `frame_inside`, `fit_inside` |
 | `crop_edit.rs` | 0002.2 | `drag_inside` |
 | `crop_edit.rs` | 0002.3 | `handle_reach` |
 | `geometry.rs` | 0002.4 | `turn_crop` |
