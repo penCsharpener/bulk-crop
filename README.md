@@ -34,6 +34,21 @@ mkdir -p ~/.local/share/icons/hicolor/64x64/apps
 cp assets/pagecrop.png ~/.local/share/icons/hicolor/64x64/apps/
 ```
 
+### As a .deb package
+
+`scripts/build-deb.sh` builds a Debian package that installs the program, its menu entry and its icon.
+It first runs `cargo sweep` to remove build files older than 7 days, then `cargo deb`. It needs both
+tools once:
+
+```sh
+cargo install cargo-sweep cargo-deb --locked
+./scripts/build-deb.sh
+sudo apt install ./target/debian/pagecrop_*.deb
+```
+
+The version comes from `version` in the root `Cargo.toml`. It shows in the window title and in the
+top bar.
+
 ## Workflow
 
 1. **Open the folder.** Click Open folder…, press Ctrl+O, or start the program with the folder as its

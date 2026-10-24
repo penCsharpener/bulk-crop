@@ -9,6 +9,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     egui::Panel::top("top_bar").show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.heading("pagecrop");
+            ui.weak(concat!("v", env!("CARGO_PKG_VERSION")));
             if ui.button("Open folder…").clicked() {
                 app.choose_folder();
             }

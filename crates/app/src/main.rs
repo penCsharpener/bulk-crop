@@ -14,7 +14,7 @@ fn main() -> eframe::Result {
     let folder = std::env::args_os().nth(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("pagecrop")
+            .with_title(concat!("pagecrop ", env!("CARGO_PKG_VERSION")))
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([900.0, 600.0])
             .with_icon(theme::window_icon()),
