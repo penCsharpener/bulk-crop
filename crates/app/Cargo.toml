@@ -2,6 +2,7 @@
 name = "pagecrop"
 version.workspace = true
 edition.workspace = true
+description = "Crop, straighten and shrink photos of book pages in bulk"
 
 [[bin]]
 name = "pagecrop"
@@ -25,7 +26,8 @@ pagecrop crops, straightens and shrinks photos of book pages in bulk. An adjustm
 page applies to every following page until the next page that has its own adjustment."""
 section = "graphics"
 priority = "optional"
-depends = "$auto"
+# The window libraries are loaded at run time, so `$auto` cannot see them.
+depends = "$auto, libxkbcommon-x11-0, libwayland-client0, libegl1"
 recommends = "xdg-desktop-portal"
 assets = [
     ["target/release/pagecrop", "usr/bin/", "755"],
