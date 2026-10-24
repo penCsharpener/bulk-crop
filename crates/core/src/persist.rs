@@ -216,4 +216,18 @@ mod tests {
         let project = Project::open(dir.path()).unwrap();
         assert_eq!(project.export, ExportOptions::for_folder(dir.path()));
     }
+
+    #[test]
+    fn file_without_alternate_loads_as_false() {
+        let dir = folder_with(&["page_001.jpg"]);
+        std::fs::write(
+            dir.path().join(SIDECAR_NAME),
+            r#"{"version":1,"sort":"name","keys":{"page_001.jpg":{"quarter_turns":1,"angle_deg":2.0,"crop":{"cx":0.0,"cy":0.0,"w":1.0,"h":1.0},"brightness":5,"contrast":0,"grayscale":false}}}"#,
+        )
+        .unwrap();
+        let saved = load(dir.path()).unwrap().unwrap();
+        let key = saved.keys.get("page_001.jpg").unwrap();
+        assert!(!key.alternate);
+        assert_eq!(key.brightness, 5);
+    }
 }
