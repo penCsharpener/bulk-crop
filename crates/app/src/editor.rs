@@ -65,6 +65,9 @@ fn canvas(app: &mut App, ui: &mut egui::Ui, texture: &egui::TextureHandle) {
     let painter = ui.painter_at(area);
     paint_picture(&painter, &texture, adjust, &layout);
     paint_frame(&painter, &layout, area, adjust.crop, app.show_grid);
+    if let Some(label) = app.side_label() {
+        paint_side_badge(&painter, area, label);
+    }
     view_input(app, ui, &response, &layout, adjust.crop);
     handle_pointer(app, ui, &response, &layout, adjust);
 }
@@ -276,6 +279,23 @@ fn paint_frame(
         let handle = egui::Rect::from_center_size(point, egui::vec2(HANDLE_SIZE, HANDLE_SIZE));
         painter.rect_filled(handle, 1.0, ACCENT);
     }
+}
+
+/// "Side A" or "Side B" in the top-left corner of the area, on a half-transparent dark rectangle.
+fn paint_side_badge(painter: &egui::Painter, area: egui::Rect, side: &str) {
+    let text = side.replacen("side", "Side", 1);
+    let galley =
+        painter.layout_no_wrap(text, egui::FontId::proportional(14.0), egui::Color32::WHITE);
+    let rect = egui::Rect::from_min_size(
+        area.min + egui::vec2(8.0, 8.0),
+        galley.size() + egui::vec2(16.0, 8.0),
+    );
+    painter.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(160));
+    painter.galley(
+        rect.min + egui::vec2(8.0, 4.0),
+        galley,
+        egui::Color32::WHITE,
+    );
 }
 
 /// Seven evenly spaced lines each way inside the frame, as a reference for level text.

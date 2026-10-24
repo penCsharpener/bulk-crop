@@ -77,6 +77,20 @@ fn page_row(ui: &mut egui::Ui, app: &App, index: usize, selected: bool) -> bool 
             ACCENT,
         );
     }
+    if let Some(side) = app.project.as_ref().and_then(|p| p.side(index)) {
+        let (text, color) = if side == 0 {
+            ("A", ui.visuals().text_color())
+        } else {
+            ("B", ACCENT)
+        };
+        painter.text(
+            egui::pos2(rect.right() - 6.0, rect.top() + 4.0),
+            Align2::RIGHT_TOP,
+            text,
+            FontId::proportional(12.0),
+            color,
+        );
+    }
     painter.text(
         egui::pos2(rect.center().x, rect.top() + THUMB_H),
         Align2::CENTER_TOP,
