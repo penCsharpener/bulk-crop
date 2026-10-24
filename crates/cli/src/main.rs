@@ -110,6 +110,10 @@ enum Command {
         /// Give later pages older modification times, so the last page is the oldest.
         #[arg(long)]
         reverse_mtime: bool,
+        /// Photograph the book page by page: odd photos show the page on the right, even photos
+        /// on the left. `--drift` and `--reverse-mtime` do not apply.
+        #[arg(long, conflicts_with_all = ["drift", "reverse_mtime"])]
+        two_sided: bool,
     },
 }
 
@@ -230,6 +234,7 @@ fn main() -> anyhow::Result<()> {
                 brightness,
                 contrast,
                 grayscale: gray,
+                alternate: false,
             }
             .normalized();
             let resize = match (long_edge, percent) {
@@ -269,10 +274,14 @@ fn main() -> anyhow::Result<()> {
             height,
             drift,
             reverse_mtime,
+            two_sided,
         } => {
-            let paths =
+            let paths = if two_sided {
+                pagecrop_testkit::write_two_sided_book(&dir, count, width, height)
+            } else {
                 pagecrop_testkit::write_book(&dir, count, width, height, drift, reverse_mtime)
-                    .with_context(|| format!("writing pages to {}", dir.display()))?;
+            }
+            .with_context(|| format!("writing pages to {}", dir.display()))?;
             println!("wrote {} pages to {}", paths.len(), dir.display());
         }
     }

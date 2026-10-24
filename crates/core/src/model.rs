@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::decode::read_taken;
 use crate::error::CoreError;
 use crate::export::ExportOptions;
+use crate::geometry::turn_crop;
 use crate::persist::{Saved, load};
 use crate::scan::list_jpegs;
 
@@ -49,6 +50,8 @@ pub struct Adjust {
     /// -100 to 100.
     pub contrast: i32,
     pub grayscale: bool,
+    /// From this page on, odd and even pages keep their own frame and fine angle.
+    pub alternate: bool,
 }
 
 impl Default for Adjust {
@@ -60,6 +63,7 @@ impl Default for Adjust {
             brightness: 0,
             contrast: 0,
             grayscale: false,
+            alternate: false,
         }
     }
 }
@@ -175,11 +179,63 @@ impl Project {
     }
 
     /// The settings that apply to page `i`. The default when none applies or `i` is out of range.
+    /// Inside a run of alternating keys the frame and the fine angle come from the nearest key on
+    /// the same side; everything else comes from the nearest key.
     pub fn effective(&self, i: usize) -> Adjust {
-        self.key_index(i)
-            .and_then(|k| self.entries.get(k))
-            .and_then(|entry| entry.key)
-            .unwrap_or_default()
+        let Some(k) = self.key_index(i) else {
+            return Adjust::default();
+        };
+        let Some(own) = self.key_at(k) else {
+            return Adjust::default();
+        };
+        if !own.alternate {
+            return own;
+        }
+        let anchor = self.run_start(k);
+        let side = self.key_at(self.side_source(anchor, i)).unwrap_or(own);
+        Adjust {
+            angle_deg: side.angle_deg,
+            crop: turn_crop(side.crop, side.quarter_turns, own.quarter_turns),
+            ..own
+        }
+    }
+
+    /// Which side page `i` is on inside a run of alternating keys: 0 for the side of the run's first
+    /// page, 1 for the other. None when page `i` does not alternate or is out of range.
+    pub fn side(&self, i: usize) -> Option<u8> {
+        let k = self.key_index(i)?;
+        if !self.key_at(k)?.alternate {
+            return None;
+        }
+        let anchor = self.run_start(k);
+        Some((i.saturating_sub(anchor) % 2) as u8)
+    }
+
+    fn key_at(&self, i: usize) -> Option<Adjust> {
+        self.entries.get(i).and_then(|e| e.key)
+    }
+
+    /// The first key of the run of alternating keys that ends at key `k`.
+    fn run_start(&self, k: usize) -> usize {
+        let mut start = k;
+        while let Some(prev) = self.keyed_page_from(start, false) {
+            if !self.key_at(prev).is_some_and(|a| a.alternate) {
+                break;
+            }
+            start = prev;
+        }
+        start
+    }
+
+    /// The page whose frame and fine angle page `i` uses inside the run that starts at `anchor`: the
+    /// nearest page at or before `i` on the same side that has its own settings, else the anchor.
+    fn side_source(&self, anchor: usize, i: usize) -> usize {
+        let parity = i.saturating_sub(anchor) % 2;
+        (anchor..=i)
+            .rev()
+            .filter(|j| (j - anchor) % 2 == parity)
+            .find(|&j| self.has_key(j))
+            .unwrap_or(anchor)
     }
 
     /// Gives page `i` its own settings, stored in normalized form.
@@ -262,6 +318,7 @@ fn date_key(entry: &ImageEntry) -> (bool, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::{quarter_turn, turn_crop};
     use filetime::FileTime;
 
     fn names(project: &Project) -> Vec<&str> {
@@ -439,6 +496,7 @@ mod tests {
             brightness: 150,
             contrast: -150,
             grayscale: true,
+            alternate: false,
         }
         .normalized();
         assert_eq!(a.quarter_turns, 1);
@@ -479,5 +537,177 @@ mod tests {
         assert_eq!(project.key_index(99), None);
         assert_eq!(project.span(99), 99..99);
         assert!(project.entries.iter().all(|e| e.key.is_none()));
+    }
+
+    /// A key that alternates, with a frame whose `cx` tells it apart from other frames.
+    fn frame(cx: f32) -> Adjust {
+        Adjust {
+            alternate: true,
+            crop: CropRect {
+                cx,
+                cy: 0.0,
+                w: 0.5,
+                h: 0.5,
+            },
+            ..Adjust::default()
+        }
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    /// The frame and the fine angle that page `page` uses. Page numbers start at 1.
+    fn look(project: &Project, page: usize) -> (f32, f32) {
+        let a = project.effective(page - 1);
+        (a.crop.cx, a.angle_deg)
+    }
+
+    fn assert_look(project: &Project, page: usize, cx: f32, angle: f32) {
+        let (got_cx, got_angle) = look(project, page);
+        assert!(
+            close(got_cx, cx) && close(got_angle, angle),
+            "page {page}: got ({got_cx}, {got_angle}), wanted ({cx}, {angle})"
+        );
+    }
+
+    /// Twelve pages; page 3 turns alternating on with frame A (cx 0.1, angle 1) and page 4 has its
+    /// own side-B frame (cx -0.1, angle -1).
+    fn two_sided() -> Project {
+        let mut project = pages(12);
+        project.set_key(
+            2,
+            Adjust {
+                angle_deg: 1.0,
+                ..frame(0.1)
+            },
+        );
+        project.set_key(
+            3,
+            Adjust {
+                angle_deg: -1.0,
+                ..frame(-0.1)
+            },
+        );
+        project
+    }
+
+    #[test]
+    fn alternating_pages_use_two_frames() {
+        let project = two_sided();
+        for page in [3, 5, 7, 9, 11] {
+            assert_look(&project, page, 0.1, 1.0);
+        }
+        for page in [4, 6, 8, 10, 12] {
+            assert_look(&project, page, -0.1, -1.0);
+        }
+    }
+
+    #[test]
+    fn side_b_starts_as_copy_of_side_a() {
+        let mut project = pages(12);
+        project.set_key(2, frame(0.1));
+        for page in 3..=12 {
+            assert_look(&project, page, 0.1, 0.0);
+        }
+    }
+
+    #[test]
+    fn tone_on_one_side_flows_to_both() {
+        let mut project = two_sided();
+        let key = Adjust {
+            brightness: 30,
+            ..project.effective(5)
+        };
+        project.set_key(5, key);
+        assert_eq!(seen(&project, 7), 30);
+        assert_look(&project, 7, 0.1, 1.0);
+        assert_eq!(seen(&project, 8), 30);
+        assert_look(&project, 8, -0.1, -1.0);
+    }
+
+    #[test]
+    fn editing_side_a_leaves_side_b() {
+        let mut project = two_sided();
+        let key = Adjust {
+            crop: frame(0.3).crop,
+            ..project.effective(6)
+        };
+        project.set_key(6, key);
+        for page in [7, 9, 11] {
+            assert_look(&project, page, 0.3, 1.0);
+        }
+        for page in [8, 10, 12] {
+            assert_look(&project, page, -0.1, -1.0);
+        }
+    }
+
+    #[test]
+    fn turning_off_keeps_earlier_pages_alternating() {
+        let mut project = two_sided();
+        let key = Adjust {
+            alternate: false,
+            ..project.effective(9)
+        };
+        project.set_key(9, key);
+        for page in [3, 5, 7, 9] {
+            assert_look(&project, page, 0.1, 1.0);
+        }
+        for page in [4, 6, 8] {
+            assert_look(&project, page, -0.1, -1.0);
+        }
+        for page in 10..=12 {
+            assert_look(&project, page, -0.1, -1.0);
+        }
+        assert_eq!(project.side(9), None);
+    }
+
+    #[test]
+    fn side_frames_follow_quarter_turn() {
+        let mut project = pages(12);
+        let a = Adjust {
+            crop: CropRect {
+                cx: 0.2,
+                cy: 0.0,
+                w: 0.5,
+                h: 0.9,
+            },
+            ..frame(0.2)
+        };
+        project.set_key(2, a);
+        let turned = quarter_turn(project.effective(4), true);
+        project.set_key(4, turned);
+        let got = project.effective(5);
+        let want = turn_crop(a.crop, 0, 1);
+        assert_eq!(got.quarter_turns, 1);
+        assert!(close(got.crop.cx, want.cx) && close(got.crop.cy, want.cy));
+        assert!(close(got.crop.w, want.w) && close(got.crop.h, want.h));
+    }
+
+    #[test]
+    fn side_of_page() {
+        let project = two_sided();
+        let sides: Vec<Option<u8>> = (2..=5).map(|page| project.side(page - 1)).collect();
+        assert_eq!(sides, [None, Some(0), Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn pages_without_alternate_behave_as_before() {
+        let key = |value| Adjust {
+            alternate: false,
+            ..brightness(value)
+        };
+        let mut project = pages(12);
+        project.set_key(3, key(10));
+        project.set_key(7, key(20));
+        project.set_key(5, key(30));
+        assert_eq!(seen(&project, 4), 10);
+        assert_eq!(seen(&project, 5), 10);
+        assert_eq!(seen(&project, 6), 30);
+        assert_eq!(seen(&project, 7), 30);
+        for page in 8..=12 {
+            assert_eq!(seen(&project, page), 20, "page {page}");
+        }
+        assert_eq!(project.side(5), None);
     }
 }

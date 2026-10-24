@@ -171,6 +171,21 @@ pub fn quarter_turn(a: Adjust, clockwise: bool) -> Adjust {
     }
 }
 
+/// A frame made for a picture with `from` quarter turns, turned to fit the same picture with `to`
+/// quarter turns, so it frames the same part of the page.
+pub fn turn_crop(crop: CropRect, from: u8, to: u8) -> CropRect {
+    let steps = (to % 4 + 4 - from % 4) % 4;
+    let mut a = Adjust {
+        quarter_turns: from % 4,
+        crop,
+        ..Adjust::default()
+    };
+    for _ in 0..steps {
+        a = quarter_turn(a, true);
+    }
+    a.crop
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,5 +375,20 @@ mod tests {
                 assert!(out.get_pixel(x, y).0[0] < 200, "white at ({x},{y})");
             }
         }
+    }
+
+    #[test]
+    fn turn_crop_by_zero_is_identity() {
+        let crop = rect(0.2, -0.1, 0.5, 0.9);
+        for k in 0..4 {
+            assert!(close_rect(turn_crop(crop, k, k), crop));
+        }
+    }
+
+    #[test]
+    fn turn_crop_round_trip() {
+        let crop = rect(0.2, -0.1, 0.5, 0.9);
+        let there = turn_crop(crop, 1, 3);
+        assert!(close_rect(turn_crop(there, 3, 1), crop));
     }
 }

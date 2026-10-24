@@ -15,8 +15,14 @@ const BOOK_EPOCH: i64 = 1_700_000_000;
 /// One page on a dark table, turned clockwise by `angle_deg` around the centre of the picture.
 /// Each page has `index + 1` dark squares in a band near its top, so pages can be told apart.
 pub fn page_image(w: u32, h: u32, index: u32, angle_deg: f32) -> RgbImage {
+    page_image_at(w, h, index, angle_deg, 0.0)
+}
+
+/// Like `page_image`, but the page centre is moved right by `shift * w` (left when negative) and the
+/// page turns about its own centre.
+pub fn page_image_at(w: u32, h: u32, index: u32, angle_deg: f32, shift: f32) -> RgbImage {
     let (wf, hf) = (w as f32, h as f32);
-    let (cx, cy) = (wf / 2.0, hf / 2.0);
+    let (cx, cy) = (wf / 2.0 + shift * wf, hf / 2.0);
     let (page_w, page_h) = (0.70 * wf, 0.80 * hf);
     let (sin, cos) = angle_deg.to_radians().sin_cos();
     RgbImage::from_fn(w, h, |x, y| {
@@ -77,6 +83,36 @@ pub fn write_book(
     Ok(paths)
 }
 
+/// How far odd and even photos of a two-sided book sit and tilt: `(angle_deg, shift)` for the photo
+/// at `index`, counted from 0. Photos 1, 3, ... sit right, photos 2, 4, ... sit left.
+fn two_sided_look(index: u32) -> (f32, f32) {
+    if index.is_multiple_of(2) {
+        (1.5, 0.08)
+    } else {
+        (-1.0, -0.08)
+    }
+}
+
+/// Writes `count` pages like `write_book`, as a book photographed page by page: odd photos show their
+/// page further right and turned +1.5 degrees, even photos further left and turned -1.0 degrees.
+pub fn write_two_sided_book(
+    dir: &Path,
+    count: u32,
+    w: u32,
+    h: u32,
+) -> std::io::Result<Vec<PathBuf>> {
+    std::fs::create_dir_all(dir).map_err(|e| with_path(e, dir))?;
+    let mut paths = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let path = dir.join(format!("page_{:03}.jpg", i + 1));
+        let (angle, shift) = two_sided_look(i);
+        let img = page_image_at(w, h, i, angle, shift);
+        write_jpeg(&img, &path).map_err(|e| with_path(e, &path))?;
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
 fn write_jpeg(img: &RgbImage, path: &Path) -> std::io::Result<()> {
     let mut out = BufWriter::new(std::fs::File::create(path)?);
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
@@ -114,5 +150,17 @@ mod tests {
         for name in ["page_001.jpg", "page_002.jpg", "page_003.jpg"] {
             assert!(dir.path().join(name).is_file(), "missing {name}");
         }
+    }
+
+    #[test]
+    fn two_sided_pages_sit_left_and_right() {
+        let (w, h) = (800, 600);
+        let at = |i| {
+            let (angle, shift) = two_sided_look(i);
+            page_image_at(w, h, i, angle, shift)
+        };
+        let (x, y) = ((0.15 * w as f32) as u32, h / 2);
+        assert_eq!(at(0).get_pixel(x, y).0, TABLE);
+        assert_ne!(at(1).get_pixel(x, y).0, TABLE);
     }
 }
