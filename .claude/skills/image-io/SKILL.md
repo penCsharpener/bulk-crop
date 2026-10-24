@@ -68,12 +68,18 @@ modification time.
 
 ## Tone
 
-Brightness and contrast are integers from -100 to 100. Build a table of 256 values once per image:
+Brightness and contrast are integers from -100 to 100. Build a table of 256 values once per image.
+Brightness is a gamma curve, so black stays 0 and white stays 255; contrast then stretches about
+mid-grey:
 
 ```
+gamma = 3 ^ (-brightness / 100)                 (+100 gives 1/3, -100 gives 3, 0 gives 1)
 k = 1.0 + contrast / 100.0                      (0.0 to 2.0)
-out(v) = clamp(round((v - 127.5) * k + 127.5 + brightness * 1.275), 0, 255)
+lifted(v) = 255 * (v / 255) ^ gamma
+out(v) = clamp(round((lifted(v) - 127.5) * k + 127.5), 0, 255)
 ```
+
+Examples: `lut(100, 0)[128] == 203`, `lut(-100, 0)[128] == 32`, `lut(50, 0)[30] == 74`.
 
 Apply the table to every channel of every pixel. Brightness 0 and contrast 0 give the identity table;
 skip the pass in that case.
