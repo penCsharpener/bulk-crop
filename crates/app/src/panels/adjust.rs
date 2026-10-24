@@ -42,19 +42,16 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
             .suffix("°")
             .text("Fine angle"),
     );
-    track(
-        app,
-        &slider,
-        Adjust {
-            angle_deg: angle,
-            ..current
-        },
-    );
+    if slider.drag_started() {
+        app.angle_start = Some(current.crop);
+    }
+    let turned = app.angled(angle);
+    track(app, &slider, turned);
+    if slider.drag_stopped() {
+        app.angle_start = None;
+    }
     if ui.button("0°").clicked() {
-        app.edit_once(Adjust {
-            angle_deg: 0.0,
-            ..current
-        });
+        app.edit_once(app.angled(0.0));
     }
 }
 

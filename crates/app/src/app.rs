@@ -7,7 +7,7 @@ use std::time::Instant;
 use image::RgbImage;
 use pagecrop_core::crop_edit::Handle;
 use pagecrop_core::error::CoreError;
-use pagecrop_core::geometry::quarter_turn;
+use pagecrop_core::geometry::{Size, base_size, fit_inside, quarter_turn};
 use pagecrop_core::history::{Edit, History};
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy, read_ahead_order};
 use pagecrop_core::persist::{self, SIDECAR_NAME};
@@ -73,6 +73,9 @@ pub struct App {
     merge_next: bool,
     /// The page whose fine angle the last key press changed, while no other edit has come since.
     nudge_page: Option<usize>,
+    /// The frame of the selected page when the current angle drag began, so dragging the angle out
+    /// and back gives the frame back. None while no angle drag is running.
+    pub angle_start: Option<CropRect>,
 }
 
 /// How many previews are kept in memory.
@@ -190,6 +193,7 @@ impl App {
             edit_start: None,
             merge_next: false,
             nudge_page: None,
+            angle_start: None,
         };
         if let Some(dir) = folder {
             app.open_folder(&dir);
@@ -337,6 +341,34 @@ impl App {
         self.project
             .as_ref()
             .map_or_else(Adjust::default, |p| p.effective(self.selected))
+    }
+
+    /// The size of the selected page's picture after its quarter turns, in full-size pixels. None
+    /// while the preview is loading or failed.
+    pub fn selected_base(&self) -> Option<Size> {
+        let Some(Content::Picture { full_size, .. }) = self.selected_content() else {
+            return None;
+        };
+        let src = Size {
+            w: full_size.0 as f32,
+            h: full_size.1 as f32,
+        };
+        Some(base_size(src, self.effective().quarter_turns))
+    }
+
+    /// The settings of the selected page with the fine angle `angle_deg`. The frame is fitted inside
+    /// the picture turned by that angle, starting from the frame as it was when the angle drag began.
+    pub fn angled(&self, angle_deg: f32) -> Adjust {
+        let current = self.effective();
+        let crop = match self.selected_base() {
+            Some(base) => fit_inside(self.angle_start.unwrap_or(current.crop), base, angle_deg),
+            None => current.crop,
+        };
+        Adjust {
+            angle_deg,
+            crop,
+            ..current
+        }
     }
 
     /// Gives the selected page its own settings. Pages after it follow them.
@@ -546,14 +578,10 @@ impl App {
     /// slider's range.
     pub fn nudge_angle(&mut self, degrees: f32) {
         let page = self.selected;
-        let current = self.effective();
-        let angle = ((current.angle_deg + degrees) * 100.0).round() / 100.0;
+        let angle = ((self.effective().angle_deg + degrees) * 100.0).round() / 100.0;
         // Presses in a row on one page are one undo step.
         self.merge_next = self.nudge_page == Some(page);
-        self.edit_once(Adjust {
-            angle_deg: angle.clamp(-15.0, 15.0),
-            ..current
-        });
+        self.edit_once(self.angled(angle.clamp(-15.0, 15.0)));
         self.nudge_page = Some(page);
     }
 
