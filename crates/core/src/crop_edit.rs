@@ -102,7 +102,13 @@ pub fn drag(
         let (w, h) = (start.w, start.h);
         let cx = clamp_to(start.cx + dx, -hx + w / 2.0, hx - w / 2.0);
         let cy = clamp_to(start.cy + dy, -hy + h / 2.0, hy - h / 2.0);
-        return CropRect { cx, cy, w, h };
+        return CropRect {
+            cx,
+            cy,
+            w,
+            h,
+            ..start
+        };
     }
     match handle {
         Handle::W | Handle::NW | Handle::SW => l = clamp_to(left + dx, -hx, right - min_x),
@@ -119,6 +125,7 @@ pub fn drag(
         cy: (t + b) / 2.0,
         w: r - l,
         h: b - t,
+        ..start
     }
 }
 
@@ -219,7 +226,13 @@ mod tests {
     }
 
     fn frame(cx: f32, cy: f32, w: f32, h: f32) -> CropRect {
-        CropRect { cx, cy, w, h }
+        CropRect {
+            cx,
+            cy,
+            w,
+            h,
+            ..CropRect::default()
+        }
     }
 
     const TOL: (f32, f32) = (0.02, 0.02);

@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use crate::decode::read_taken;
 use crate::error::CoreError;
 use crate::export::ExportOptions;
-use crate::geometry::turn_crop;
+use crate::geometry::{quad_ok, turn_crop};
 use crate::persist::{Saved, load};
 use crate::scan::list_jpegs;
 
-/// A crop frame in fractions of the picture: the centre (`cx`, `cy`) and the size (`w`, `h`).
-/// The default is the whole picture.
+/// A crop frame in fractions of the picture: the centre (`cx`, `cy`) and the size (`w`, `h`) of a
+/// rectangle, and how far each of its corners is shifted from the rectangle's corner, in the order
+/// NW, NE, SE, SW (clockwise on screen), x then y, in fractions of the picture like `cx` and `cy`.
+/// The default is the whole picture with no shift.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CropRect {
@@ -23,6 +25,7 @@ pub struct CropRect {
     pub cy: f32,
     pub w: f32,
     pub h: f32,
+    pub corner_shift: [(f32, f32); 4],
 }
 
 impl Default for CropRect {
@@ -32,6 +35,7 @@ impl Default for CropRect {
             cy: 0.0,
             w: 1.0,
             h: 1.0,
+            corner_shift: [(0.0, 0.0); 4],
         }
     }
 }
@@ -68,17 +72,31 @@ impl Default for Adjust {
     }
 }
 
+/// The frame with its size floored, and with its corner shifts cleared when they do not make a
+/// valid four-sided frame (see `quad_ok`).
+fn normalized_crop(crop: CropRect) -> CropRect {
+    let crop = CropRect {
+        w: crop.w.max(0.02),
+        h: crop.h.max(0.02),
+        ..crop
+    };
+    if quad_ok(crop) {
+        crop
+    } else {
+        CropRect {
+            corner_shift: [(0.0, 0.0); 4],
+            ..crop
+        }
+    }
+}
+
 impl Adjust {
     /// Brings every field into its allowed range.
     pub fn normalized(self) -> Adjust {
         Adjust {
             quarter_turns: self.quarter_turns % 4,
             angle_deg: self.angle_deg.clamp(-45.0, 45.0),
-            crop: CropRect {
-                w: self.crop.w.max(0.02),
-                h: self.crop.h.max(0.02),
-                ..self.crop
-            },
+            crop: normalized_crop(self.crop),
             brightness: self.brightness.clamp(-100, 100),
             contrast: self.contrast.clamp(-100, 100),
             ..self
@@ -499,6 +517,40 @@ mod tests {
     }
 
     #[test]
+    fn invalid_shift_is_cleared_by_normalized() {
+        let a = Adjust {
+            crop: CropRect {
+                cx: 0.0,
+                cy: 0.0,
+                w: 0.6,
+                h: 0.6,
+                corner_shift: [(0.7, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+            },
+            ..Adjust::default()
+        }
+        .normalized();
+        assert_eq!(a.crop.corner_shift, [(0.0, 0.0); 4]);
+        assert!((a.crop.w - 0.6).abs() < 1e-4 && (a.crop.h - 0.6).abs() < 1e-4);
+        assert!(a.crop.cx.abs() < 1e-4 && a.crop.cy.abs() < 1e-4);
+    }
+
+    #[test]
+    fn valid_shift_survives_normalized() {
+        let shift = [(0.07, 0.0), (-0.07, 0.0), (0.0, 0.0), (0.0, 0.0)];
+        let a = Adjust {
+            crop: CropRect {
+                w: 0.6,
+                h: 0.6,
+                corner_shift: shift,
+                ..CropRect::default()
+            },
+            ..Adjust::default()
+        }
+        .normalized();
+        assert_eq!(a.crop.corner_shift, shift);
+    }
+
+    #[test]
     fn normalized_clamps_all_fields() {
         let a = Adjust {
             quarter_turns: 5,
@@ -508,6 +560,7 @@ mod tests {
                 cy: 0.4,
                 w: 0.0,
                 h: 0.001,
+                ..CropRect::default()
             },
             brightness: 150,
             contrast: -150,
@@ -564,6 +617,7 @@ mod tests {
                 cy: 0.0,
                 w: 0.5,
                 h: 0.5,
+                ..CropRect::default()
             },
             ..Adjust::default()
         }
@@ -687,6 +741,7 @@ mod tests {
                 cy: 0.0,
                 w: 0.5,
                 h: 0.9,
+                ..CropRect::default()
             },
             ..frame(0.2)
         };
