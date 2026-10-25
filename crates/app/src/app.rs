@@ -185,12 +185,14 @@ pub struct ResultView {
 }
 
 /// A drag of one part of the crop frame. `start` is the frame when the drag began and `press` the
-/// pointer position at that moment, both in fractions of the base picture.
+/// pointer position at that moment, both in fractions of the base picture. `corner` is set when Ctrl
+/// was held as the drag began on a corner handle: that corner then moves alone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Drag {
     pub handle: Handle,
     pub start: CropRect,
     pub press: (f32, f32),
+    pub corner: bool,
 }
 
 /// A drag of a spin handle. `start_deg` is the fine angle when the drag began and `press` the
@@ -436,6 +438,17 @@ impl App {
         Adjust {
             angle_deg,
             crop,
+            ..current
+        }
+    }
+
+    /// The settings of the selected page with the frame made a rectangle again: the corner shifts
+    /// are zero, and the frame is fitted inside the picture, which the rectangle can reach further
+    /// out of than the shifted corners did.
+    pub fn squared(&self) -> Adjust {
+        let current = self.effective();
+        Adjust {
+            crop: squared_crop(current.crop, self.selected_base(), current.angle_deg),
             ..current
         }
     }
@@ -1015,6 +1028,16 @@ fn startup_folder(arg: Option<PathBuf>, stored: Option<String>) -> Option<PathBu
     arg.or_else(|| stored.map(PathBuf::from).filter(|dir| dir.is_dir()))
 }
 
+/// `crop` without corner shifts, fitted inside the picture turned by `angle_deg` when its size
+/// `base` is known.
+fn squared_crop(crop: CropRect, base: Option<Size>, angle_deg: f32) -> CropRect {
+    let rectangle = CropRect {
+        corner_shift: [(0.0, 0.0); 4],
+        ..crop
+    };
+    base.map_or(rectangle, |base| fit_inside(rectangle, base, angle_deg))
+}
+
 /// Copies an unreadable settings file to `pagecrop.json.bak` and says so in a notice.
 fn keep_unreadable_settings(dir: &Path, path: &Path) -> String {
     let backup = dir.join(format!("{SIDECAR_NAME}.bak"));
@@ -1059,5 +1082,33 @@ mod tests {
     #[test]
     fn nothing_given_gives_nothing() {
         assert_eq!(startup_folder(None, None), None);
+    }
+
+    fn shifted() -> CropRect {
+        CropRect {
+            cx: 0.0,
+            cy: 0.0,
+            w: 0.9,
+            h: 0.9,
+            corner_shift: [(0.05, 0.0), (-0.05, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        }
+    }
+
+    #[test]
+    fn squaring_clears_every_shift() {
+        let square = squared_crop(shifted(), None, 0.0);
+        assert_eq!(square.corner_shift, [(0.0, 0.0); 4]);
+        assert!((square.w - 0.9).abs() < 1e-6 && (square.h - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn squaring_fits_the_rectangle_inside_a_turned_picture() {
+        let base = Size {
+            w: 1000.0,
+            h: 800.0,
+        };
+        let square = squared_crop(shifted(), Some(base), 8.0);
+        assert_eq!(square.corner_shift, [(0.0, 0.0); 4]);
+        assert!(pagecrop_core::geometry::frame_inside(square, base, 8.0));
     }
 }

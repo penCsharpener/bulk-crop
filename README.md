@@ -61,7 +61,9 @@ top bar.
    R (Shift+R turns the other way) or the ⟲ and ⟳ buttons. Set the fine angle with [ and ] or the
    slider, or drag a round handle beside the left or right edge of the frame to turn the picture in
    0.1° steps. The Handle reach slider in the View section sets how close the pointer must be to grab
-   a frame handle or a round turn handle. Brightness, contrast and greyscale are in the Tone section,
+   a frame handle or a round turn handle. For a page photographed at an angle, hold Ctrl and drag a
+   corner of the frame onto the page's corner: that corner moves alone, and the export straightens the
+   page. Square corners in the Rotation section makes the frame a rectangle again. Brightness, contrast and greyscale are in the Tone section,
    where the last three tone settings stay as buttons: one click puts a setting back. The page now has
    its own settings, shown by a dot in the page list. Later pages follow it until the next page with
    its own settings. Press N to jump to that page.
@@ -95,6 +97,7 @@ top bar.
 | Middle drag, or Space + drag | Pan the zoomed picture |
 | Double click on empty picture | Fit the picture to the window |
 | Drag a handle of the frame | Move that edge or corner |
+| Ctrl + drag a frame corner | Move that corner alone, for a page shot at an angle |
 | Ctrl+Z | Undo |
 | Ctrl+Shift+Z, Ctrl+Y | Redo |
 | Ctrl+O | Open a folder |

@@ -56,6 +56,16 @@ fn rotation(app: &mut App, ui: &mut egui::Ui) {
     if ui.button("0°").clicked() {
         app.edit_once(app.angled(0.0));
     }
+    let shifted = current.crop.corner_shift != [(0.0, 0.0); 4];
+    if ui
+        .add_enabled(shifted, egui::Button::new("Square corners"))
+        .on_hover_text(
+            "Ctrl + drag a corner of the frame to follow a page photographed at an angle; the export straightens it. This makes the frame a rectangle again.",
+        )
+        .clicked()
+    {
+        app.edit_once(app.squared());
+    }
 }
 
 fn sides(app: &mut App, ui: &mut egui::Ui) {

@@ -1,9 +1,9 @@
 //! Central area: the selected page turned by its settings, with its crop frame on top.
 
 use pagecrop_core::crop_edit::{
-    Handle, drag_inside, handle_reach, hit_test, spin_angle, spin_reach,
+    Handle, drag_corner, drag_inside, handle_reach, hit_test, spin_angle, spin_reach,
 };
-use pagecrop_core::geometry::{Resize, Size, base_size};
+use pagecrop_core::geometry::{Resize, Size, SquareToQuad, base_size, frame_corners};
 use pagecrop_core::model::{Adjust, CropRect};
 use pagecrop_core::render::render;
 
@@ -220,12 +220,14 @@ impl Layout {
         egui::Rect::from_center_size(self.centre, self.base_points())
     }
 
-    /// The crop frame as an upright rectangle on screen.
+    /// The four corners of the crop frame on screen, NW, NE, SE, SW.
+    fn frame_points(&self, crop: CropRect) -> [egui::Pos2; 4] {
+        frame_corners(crop).map(|corner| self.to_screen(corner))
+    }
+
+    /// The upright box around the crop frame on screen: the frame itself when it is a rectangle.
     fn frame_rect(&self, crop: CropRect) -> egui::Rect {
-        egui::Rect::from_min_max(
-            self.to_screen((crop.cx - crop.w / 2.0, crop.cy - crop.h / 2.0)),
-            self.to_screen((crop.cx + crop.w / 2.0, crop.cy + crop.h / 2.0)),
-        )
+        egui::Rect::from_points(&self.frame_points(crop))
     }
 }
 
@@ -260,42 +262,71 @@ fn paint_frame(
     crop: CropRect,
     grid: bool,
 ) {
-    let frame = layout.frame_rect(crop);
+    let points = layout.frame_points(crop);
     let shade = egui::Color32::from_black_alpha(128);
-    let strips = [
-        egui::Rect::from_min_max(area.min, egui::pos2(area.max.x, frame.min.y)),
-        egui::Rect::from_min_max(egui::pos2(area.min.x, frame.max.y), area.max),
-        egui::Rect::from_min_max(
-            egui::pos2(area.min.x, frame.min.y),
-            egui::pos2(frame.min.x, frame.max.y),
-        ),
-        egui::Rect::from_min_max(
-            egui::pos2(frame.max.x, frame.min.y),
-            egui::pos2(area.max.x, frame.max.y),
-        ),
-    ];
-    for strip in strips {
-        painter.rect_filled(strip, 0.0, shade);
-    }
+    let outer = outer_ring(area, points);
+    painter.add(egui::Shape::mesh(shade_mesh(outer, points, shade)));
     if grid {
-        paint_grid(painter, frame);
+        let stroke = egui::Stroke::new(0.5, egui::Color32::from_white_alpha(140));
+        for line in grid_lines(points) {
+            painter.line_segment(line, stroke);
+        }
     }
-    painter.rect_stroke(
-        frame,
-        0.0,
-        egui::Stroke::new(1.0, egui::Color32::BLACK),
-        egui::StrokeKind::Outside,
-    );
-    painter.rect_stroke(
-        frame,
-        0.0,
+    let outline = points.to_vec();
+    painter.add(egui::Shape::closed_line(
+        outline.clone(),
+        egui::Stroke::new(2.5, egui::Color32::from_black_alpha(200)),
+    ));
+    painter.add(egui::Shape::closed_line(
+        outline,
         egui::Stroke::new(1.5, egui::Color32::WHITE),
-        egui::StrokeKind::Middle,
-    );
-    for point in handle_points(frame) {
+    ));
+    for point in handle_points(points) {
         let handle = egui::Rect::from_center_size(point, egui::vec2(HANDLE_SIZE, HANDLE_SIZE));
         painter.rect_filled(handle, 1.0, ACCENT);
     }
+}
+
+/// The corners, NW, NE, SE, SW, of a rectangle that contains both `area` and the frame `points`.
+fn outer_ring(area: egui::Rect, points: [egui::Pos2; 4]) -> [egui::Pos2; 4] {
+    let rect = area.union(egui::Rect::from_points(&points));
+    [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ]
+}
+
+/// The ring between two quadrilaterals as one mesh, `outer` around `inner`, both in the order NW, NE,
+/// SE, SW. Vertices 0 to 3 are the outer ring and 4 to 7 the inner one. Each side is two triangles:
+/// outer i, outer i+1, inner i+1 and outer i, inner i+1, inner i.
+fn shade_mesh(outer: [egui::Pos2; 4], inner: [egui::Pos2; 4], color: egui::Color32) -> egui::Mesh {
+    let mut mesh = egui::Mesh::default();
+    for point in outer.into_iter().chain(inner) {
+        mesh.colored_vertex(point, color);
+    }
+    for i in 0..4u32 {
+        let next = (i + 1) % 4;
+        mesh.add_triangle(i, next, 4 + next);
+        mesh.add_triangle(i, 4 + next, 4 + i);
+    }
+    mesh
+}
+
+/// The grid lines of the frame `points` (NW, NE, SE, SW): seven lines from top to bottom and then
+/// seven across, each an eighth of the way further, drawn through the same map the export uses so
+/// they meet where the page's own lines will be straight.
+fn grid_lines(points: [egui::Pos2; 4]) -> Vec<[egui::Pos2; 2]> {
+    let map = SquareToQuad::new(points.map(|p| (p.x, p.y)));
+    let at = |s: f32, t: f32| {
+        let (x, y) = map.apply(s, t);
+        egui::pos2(x, y)
+    };
+    let steps = (1..=7).map(|k| k as f32 / 8.0);
+    let columns = steps.clone().map(|k| [at(k, 0.0), at(k, 1.0)]);
+    let rows = steps.map(|k| [at(0.0, k), at(1.0, k)]);
+    columns.chain(rows).collect()
 }
 
 /// Where the two spin handles are: the left and the right of the frame, at its vertical middle.
@@ -387,39 +418,24 @@ fn paint_side_badge(painter: &egui::Painter, area: egui::Rect, side: &str) {
     );
 }
 
-/// Seven evenly spaced lines each way inside the frame, as a reference for level text.
-fn paint_grid(painter: &egui::Painter, frame: egui::Rect) {
-    let stroke = egui::Stroke::new(0.5, egui::Color32::from_white_alpha(140));
-    for i in 1..=7 {
-        let t = i as f32 / 8.0;
-        let x = frame.min.x + frame.width() * t;
-        let y = frame.min.y + frame.height() * t;
-        painter.line_segment(
-            [egui::pos2(x, frame.min.y), egui::pos2(x, frame.max.y)],
-            stroke,
-        );
-        painter.line_segment(
-            [egui::pos2(frame.min.x, y), egui::pos2(frame.max.x, y)],
-            stroke,
-        );
-    }
+/// The eight handles: the corners NW, NE, SE, SW, then the middle of each edge N, E, S, W.
+fn handle_points(p: [egui::Pos2; 4]) -> [egui::Pos2; 8] {
+    let middle = |a: egui::Pos2, b: egui::Pos2| a + (b - a) * 0.5;
+    [
+        p[0],
+        p[1],
+        p[2],
+        p[3],
+        middle(p[0], p[1]),
+        middle(p[1], p[2]),
+        middle(p[3], p[2]),
+        middle(p[0], p[3]),
+    ]
 }
 
-/// The eight handles: corners first, then the middle of each edge.
-fn handle_points(frame: egui::Rect) -> [egui::Pos2; 8] {
-    let (l, r) = (frame.min.x, frame.max.x);
-    let (t, b) = (frame.min.y, frame.max.y);
-    let (cx, cy) = (frame.center().x, frame.center().y);
-    [
-        egui::pos2(l, t),
-        egui::pos2(r, t),
-        egui::pos2(l, b),
-        egui::pos2(r, b),
-        egui::pos2(cx, t),
-        egui::pos2(cx, b),
-        egui::pos2(l, cy),
-        egui::pos2(r, cy),
-    ]
+/// Whether `handle` is one of the four corners, which Ctrl + drag moves alone.
+fn is_corner(handle: Handle) -> bool {
+    matches!(handle, Handle::NW | Handle::NE | Handle::SE | Handle::SW)
 }
 
 /// The cursor for the part of the frame under the pointer, or while dragging it.
@@ -517,7 +533,7 @@ fn handle_pointer(
         .hover_pos()
         .and_then(|pos| hit_test(adjust.crop, layout.to_frame(pos), reach));
     // Space turns a left drag into a pan, so it never starts a handle or spin drag.
-    let space = ui.input(|i| i.key_down(egui::Key::Space));
+    let (space, ctrl) = ui.input(|i| (i.key_down(egui::Key::Space), i.modifiers.command));
     let (dots, radii) = spin_positions(app, layout, response.rect, adjust.crop);
     let on_spin = !space
         && response
@@ -528,6 +544,8 @@ fn handle_pointer(
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     } else if on_spin {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    } else if app.drag.is_some_and(|d| d.corner) || (ctrl && hover.is_some_and(is_corner)) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
     } else if let Some(handle) = app.drag.map(|d| d.handle).or(hover) {
         ui.ctx().set_cursor_icon(cursor_for(handle));
     }
@@ -551,6 +569,7 @@ fn handle_pointer(
                     handle,
                     start: adjust.crop,
                     press: press_frac,
+                    corner: ctrl && is_corner(handle),
                 });
                 app.begin_edit();
             }
@@ -577,14 +596,24 @@ fn handle_pointer(
     {
         let now = layout.to_frame(pos);
         let delta = (now.0 - drag.press.0, now.1 - drag.press.1);
-        let crop = drag_inside(
-            drag.start,
-            drag.handle,
-            delta,
-            layout.base,
-            adjust.angle_deg,
-            MIN_FRAME,
-        );
+        let crop = if drag.corner {
+            drag_corner(
+                drag.start,
+                drag.handle,
+                delta,
+                layout.base,
+                adjust.angle_deg,
+            )
+        } else {
+            drag_inside(
+                drag.start,
+                drag.handle,
+                delta,
+                layout.base,
+                adjust.angle_deg,
+                MIN_FRAME,
+            )
+        };
         app.apply_edit(Adjust { crop, ..adjust });
     }
     if response.drag_stopped() {
@@ -675,5 +704,171 @@ mod tests {
         let [left, right] = spin_dots(wide, 10.0, 10.0, area());
         assert!((left.x - 10.0).abs() < 1e-3, "left = {left:?}");
         assert!((right.x - 990.0).abs() < 1e-3, "right = {right:?}");
+    }
+
+    /// A layout whose base picture is 1000 x 800 points centred at (500, 400).
+    fn layout() -> Layout {
+        Layout {
+            fit_centre: egui::pos2(500.0, 400.0),
+            centre: egui::pos2(500.0, 400.0),
+            scale: 1.0,
+            base: Size {
+                w: 1000.0,
+                h: 800.0,
+            },
+            texture: egui::vec2(1000.0, 800.0),
+        }
+    }
+
+    fn trapezoid() -> CropRect {
+        CropRect {
+            cx: 0.0,
+            cy: 0.0,
+            w: 0.6,
+            h: 0.5,
+            corner_shift: [(0.1, 0.0), (-0.1, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        }
+    }
+
+    fn near(a: egui::Pos2, x: f32, y: f32) -> bool {
+        (a.x - x).abs() < 1e-3 && (a.y - y).abs() < 1e-3
+    }
+
+    #[test]
+    fn frame_points_follow_the_shift() {
+        let p = layout().frame_points(trapezoid());
+        // NW is the rectangle's corner (-0.3, -0.25) moved right by 0.1 of the base width.
+        assert!(near(p[0], 500.0 - 200.0, 400.0 - 200.0), "{p:?}");
+        assert!(near(p[1], 500.0 + 200.0, 400.0 - 200.0), "{p:?}");
+        assert!(near(p[2], 500.0 + 300.0, 400.0 + 200.0), "{p:?}");
+        assert!(near(p[3], 500.0 - 300.0, 400.0 + 200.0), "{p:?}");
+    }
+
+    #[test]
+    fn frame_rect_is_the_bounding_box() {
+        let rect = layout().frame_rect(trapezoid());
+        assert!(
+            near(rect.min, 200.0, 200.0) && near(rect.max, 800.0, 600.0),
+            "{rect:?}"
+        );
+    }
+
+    #[test]
+    fn plain_frame_points_are_the_rectangle_corners() {
+        let plain = CropRect {
+            corner_shift: [(0.0, 0.0); 4],
+            ..trapezoid()
+        };
+        let p = layout().frame_points(plain);
+        let rect = layout().frame_rect(plain);
+        assert!(near(p[0], rect.min.x, rect.min.y));
+        assert!(near(p[2], rect.max.x, rect.max.y));
+    }
+
+    /// Twice the signed area of a triangle; positive when it runs clockwise on screen.
+    fn cross(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> f32 {
+        (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    }
+
+    fn quad_area(p: [egui::Pos2; 4]) -> f32 {
+        (cross(p[0], p[1], p[2]) + cross(p[0], p[2], p[3])) / 2.0
+    }
+
+    #[test]
+    fn outer_ring_contains_area_and_frame() {
+        let points = layout().frame_points(trapezoid());
+        let outer = outer_ring(area(), points);
+        assert!(
+            near(outer[0], 0.0, 0.0) && near(outer[2], 1000.0, 800.0),
+            "{outer:?}"
+        );
+        let big = [
+            egui::pos2(-50.0, 100.0),
+            egui::pos2(300.0, 100.0),
+            egui::pos2(300.0, 900.0),
+            egui::pos2(-50.0, 900.0),
+        ];
+        let outer = outer_ring(area(), big);
+        assert!(
+            near(outer[0], -50.0, 0.0) && near(outer[2], 1000.0, 900.0),
+            "{outer:?}"
+        );
+    }
+
+    #[test]
+    fn shade_covers_exactly_the_ring() {
+        let inner = layout().frame_points(trapezoid());
+        let outer = outer_ring(area(), inner);
+        let mesh = shade_mesh(outer, inner, egui::Color32::BLACK);
+        assert_eq!(mesh.indices.len(), 24, "two triangles per side");
+        let mut area_sum = 0.0;
+        for tri in mesh.indices.chunks(3) {
+            let at = |i: u32| mesh.vertices[i as usize].pos;
+            let signed = cross(at(tri[0]), at(tri[1]), at(tri[2])) / 2.0;
+            assert!(signed >= -1e-3, "triangle {tri:?} runs the wrong way");
+            area_sum += signed;
+        }
+        let expected = quad_area(outer) - quad_area(inner);
+        assert!(
+            (area_sum - expected).abs() < 1.0,
+            "{area_sum} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn shade_uses_the_documented_triangles() {
+        let inner = layout().frame_points(trapezoid());
+        let outer = outer_ring(area(), inner);
+        let mesh = shade_mesh(outer, inner, egui::Color32::BLACK);
+        // Vertices 0..4 are the outer ring, 4..8 the inner ring, both NW, NE, SE, SW.
+        assert_eq!(&mesh.indices[..6], &[0, 1, 5, 0, 5, 4]);
+        assert_eq!(&mesh.indices[18..], &[3, 0, 4, 3, 4, 7]);
+    }
+
+    #[test]
+    fn grid_leans_with_the_sides() {
+        let points = layout().frame_points(trapezoid());
+        let lines = grid_lines(points);
+        assert_eq!(lines.len(), 14);
+        // Line 1 of the columns runs from the top edge to the bottom edge, slanting like the sides.
+        let [top, bottom] = lines[0];
+        assert!((top.y - 200.0).abs() < 1e-2 && (bottom.y - 600.0).abs() < 1e-2);
+        assert!(top.x > 300.0 && top.x < 500.0 && bottom.x > 200.0 && bottom.x < 500.0);
+        assert!(
+            top.x - bottom.x > 0.0,
+            "the left column leans in at the top"
+        );
+    }
+
+    #[test]
+    fn grid_of_a_rectangle_is_straight() {
+        let plain = CropRect {
+            corner_shift: [(0.0, 0.0); 4],
+            ..trapezoid()
+        };
+        let lines = grid_lines(layout().frame_points(plain));
+        // Columns first: line 4 of 8 is the vertical middle, rows follow.
+        let [top, bottom] = lines[3];
+        assert!(
+            near(top, 500.0, 200.0) && near(bottom, 500.0, 600.0),
+            "{top:?} {bottom:?}"
+        );
+        let [left, right] = lines[7 + 3];
+        assert!(
+            near(left, 200.0, 400.0) && near(right, 800.0, 400.0),
+            "{left:?} {right:?}"
+        );
+    }
+
+    #[test]
+    fn handles_sit_on_the_corners_and_edge_middles() {
+        let points = layout().frame_points(trapezoid());
+        let h = handle_points(points);
+        assert!(near(h[0], points[0].x, points[0].y) && near(h[3], points[3].x, points[3].y));
+        // N, E, S, W follow, each halfway between its two corners.
+        assert!(near(h[4], 500.0, 200.0), "{:?}", h[4]);
+        assert!(near(h[5], 750.0, 400.0), "{:?}", h[5]);
+        assert!(near(h[6], 500.0, 600.0), "{:?}", h[6]);
+        assert!(near(h[7], 250.0, 400.0), "{:?}", h[7]);
     }
 }
