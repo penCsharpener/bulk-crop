@@ -132,6 +132,9 @@ pub struct Project {
     pub orphans: BTreeMap<String, Adjust>,
     /// Where and how the pictures are exported.
     pub export: ExportOptions,
+    /// The parts of the settings file that could not be read and were left out. Empty when the
+    /// folder had no settings file.
+    pub dropped: Vec<String>,
 }
 
 impl Project {
@@ -149,9 +152,9 @@ impl Project {
 
     /// The only place a `Project` is built.
     fn build(dir: &Path, saved: Option<Saved>) -> Result<Project, CoreError> {
-        let (sort, mut keys, saved_export) = match saved {
-            Some(saved) => (saved.sort, saved.keys, saved.export),
-            None => (SortBy::Name, BTreeMap::new(), None),
+        let (sort, mut keys, saved_export, dropped) = match saved {
+            Some(saved) => (saved.sort, saved.keys, saved.export, saved.dropped),
+            None => (SortBy::Name, BTreeMap::new(), None, Vec::new()),
         };
         let entries = list_jpegs(dir)?
             .into_iter()
@@ -172,6 +175,7 @@ impl Project {
             sort: SortBy::Name,
             orphans: keys,
             export,
+            dropped,
         };
         project.sort(sort);
         Ok(project)
@@ -410,6 +414,7 @@ mod tests {
             sort: SortBy::Name,
             orphans: BTreeMap::new(),
             export: ExportOptions::default(),
+            dropped: Vec::new(),
         };
         project.sort(SortBy::Date);
         assert_eq!(names(&project), ["d.jpg", "a.jpg", "c.jpg", "b.jpg"]);
@@ -433,6 +438,7 @@ mod tests {
             sort: SortBy::Name,
             orphans: BTreeMap::new(),
             export: ExportOptions::default(),
+            dropped: Vec::new(),
         }
     }
 
@@ -576,6 +582,22 @@ mod tests {
         assert_eq!(a.brightness, 100);
         assert_eq!(a.contrast, -100);
         assert!(a.grayscale);
+    }
+
+    #[test]
+    fn dropped_parts_reach_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("page_001.jpg"), b"").unwrap();
+        std::fs::write(
+            dir.path().join(crate::persist::SIDECAR_NAME),
+            r#"{"keys":{"page_001.jpg":{"contrast":"x"}},"sort":"sideways"}"#,
+        )
+        .unwrap();
+        let project = Project::open(dir.path()).unwrap();
+        assert_eq!(project.dropped, ["sort", "page_001.jpg"]);
+        assert!(project.entries[0].key.is_none());
+        let clean = Project::open_without_settings(dir.path()).unwrap();
+        assert!(clean.dropped.is_empty());
     }
 
     #[test]

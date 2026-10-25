@@ -48,7 +48,8 @@ cargo test --workspace
 - Parameters borrow: `&Path`, `&str`, `&[T]`, `&RgbImage`. Return values are owned.
 - Data types derive `Debug, Clone, PartialEq`. Small plain values also derive `Copy`.
 - Anything written to disk derives `Serialize, Deserialize` and has `#[serde(default)]` on the struct, so
-  older files keep loading when a field is added.
+  older files keep loading when a field is added, so a settings file copied from an older version loads
+  what still fits. Each minor version has its own settings file; there is no migration.
 - Convert numbers on purpose. Round or clamp first, then cast: `(x.round().max(1.0)) as u32`. Never cast
   a possibly negative float straight to an unsigned integer.
 - Compare floats in tests with a tolerance (`(a - b).abs() < 1e-4`), never with `==`.
@@ -84,9 +85,10 @@ cargo test --workspace
 ## Data that must not be lost
 
 - Original photos are never written to. The only exception is the bin button: after the user confirms, it moves one photo to the desktop trash with `delete::move_to_trash`. Nothing else may delete, move or change a photo.
-- The app writes into the export folder and writes `pagecrop.json` into the photo folder. It writes nothing
-  else there, ever.
-- `pagecrop.json` holds the user's adjustments. Save it by writing a temporary file and renaming it.
+- The app writes into the export folder and writes the settings file `persist::SIDECAR_NAME`
+  (`pagecrop_v05.json` in 0.5) into the photo folder. It writes nothing else there, ever.
+- The settings file `persist::SIDECAR_NAME` holds the user's adjustments. Save it by writing a temporary
+  file and renaming it.
 
 ## Commits
 

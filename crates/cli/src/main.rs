@@ -10,6 +10,7 @@ use pagecrop_core::encode::write_jpeg;
 use pagecrop_core::export::{ExportOptions, Outcome, Progress, plan, run};
 use pagecrop_core::geometry::{Resize, quad_ok};
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
+use pagecrop_core::persist::{SIDECAR_NAME, older_settings};
 use pagecrop_core::render::render;
 
 /// Command-line front end for pagecrop. Commands are added as the core functions they call exist.
@@ -32,7 +33,9 @@ enum Command {
     /// Print the size of a picture after its EXIF orientation is applied, and the orientation.
     Info { file: PathBuf },
     /// List the pictures in a folder, one per line with its date, then the count. A * in front of
-    /// a name marks a page that has its own settings in pagecrop.json.
+    /// a name marks a page that has its own settings in this version's settings file
+    /// (`pagecrop_vMm.json`, for example `pagecrop_v05.json` for 0.5). Parts of that file that could
+    /// not be read, and settings files of other versions, are reported on stderr.
     Scan {
         dir: PathBuf,
         #[arg(long, value_enum, default_value_t = SortArg::Name)]
@@ -297,6 +300,20 @@ fn main() -> anyhow::Result<()> {
                 println!("{}  {mark}{}", format_taken(entry.taken), entry.file_name);
             }
             println!("{} images", project.entries.len());
+            if !project.dropped.is_empty() {
+                eprintln!(
+                    "Some settings in {SIDECAR_NAME} could not be read and were left out: {}",
+                    project.dropped.join(", ")
+                );
+            }
+            if !dir.join(SIDECAR_NAME).is_file()
+                && let Some(older) = older_settings(&dir).first()
+            {
+                eprintln!(
+                    "This folder has settings from another pagecrop version ({older}). To use \
+                     them, copy the file to {SIDECAR_NAME} and scan the folder again."
+                );
+            }
         }
         Command::GenFixtures {
             dir,

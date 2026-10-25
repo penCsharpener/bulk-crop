@@ -12,5 +12,5 @@ path = "src/main.rs"
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
-pagecrop-core = { version = "0.4.0", path = "../core" }
-pagecrop-testkit = { version = "0.4.0", path = "../testkit" }
+pagecrop-core = { version = "0.5.0", path = "../core" }
+pagecrop-testkit = { version = "0.5.0", path = "../testkit" }
