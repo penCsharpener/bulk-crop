@@ -268,7 +268,10 @@ impl App {
 
     pub fn open_folder(&mut self, dir: &Path) {
         let (opened, notice) = match Project::open(dir) {
-            Ok(project) => (Ok(project), None),
+            Ok(project) => {
+                let notice = folder_notice(dir, &project);
+                (Ok(project), notice)
+            }
             Err(CoreError::Sidecar { path, .. }) => (
                 Project::open_without_settings(dir),
                 Some(keep_unreadable_settings(dir, &path)),
@@ -1038,13 +1041,58 @@ fn squared_crop(crop: CropRect, base: Option<Size>, angle_deg: f32) -> CropRect 
     base.map_or(rectangle, |base| fit_inside(rectangle, base, angle_deg))
 }
 
-/// Copies an unreadable settings file to `pagecrop.json.bak` and says so in a notice.
+/// Copies an unreadable settings file to `<SIDECAR_NAME>.bak` and says so in a notice.
 fn keep_unreadable_settings(dir: &Path, path: &Path) -> String {
     let backup = dir.join(format!("{SIDECAR_NAME}.bak"));
     match std::fs::copy(path, &backup) {
-        Ok(_) => "Settings file was unreadable, kept as pagecrop.json.bak".to_owned(),
+        Ok(_) => format!("Settings file was unreadable, kept as {SIDECAR_NAME}.bak"),
         Err(err) => format!("Settings file was unreadable and could not be kept: {err}"),
     }
+}
+
+/// The settings note for a folder that opened: what was left out, or the hint about settings of
+/// another version. The listing of the folder is cheap, so it runs here.
+fn folder_notice(dir: &Path, project: &Project) -> Option<String> {
+    settings_notice(
+        SIDECAR_NAME,
+        &project.dropped,
+        dir.join(SIDECAR_NAME).is_file(),
+        &persist::older_settings(dir),
+    )
+}
+
+/// How many dropped names a notice lists before it says `and N more`.
+const NOTICE_NAMES: usize = 5;
+
+/// The note about the settings of a freshly opened folder, if one is due. Parts that could not be
+/// read (`dropped`) come first. Failing that, when the folder has no file called `name`
+/// (`has_current` false) but has settings of another version (`older`), the note says how to use
+/// them.
+fn settings_notice(
+    name: &str,
+    dropped: &[String],
+    has_current: bool,
+    older: &[String],
+) -> Option<String> {
+    if !dropped.is_empty() {
+        let mut list = dropped
+            .iter()
+            .take(NOTICE_NAMES)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if dropped.len() > NOTICE_NAMES {
+            list.push_str(&format!(" and {} more", dropped.len() - NOTICE_NAMES));
+        }
+        return Some(format!(
+            "Some settings in {name} could not be read and were left out: {list}"
+        ));
+    }
+    let first = older.first().filter(|_| !has_current)?;
+    Some(format!(
+        "This folder has settings from another pagecrop version ({first}). To use them, \
+         copy the file to {name} and open the folder again."
+    ))
 }
 
 #[cfg(test)]
@@ -1110,5 +1158,63 @@ mod tests {
         let square = squared_crop(shifted(), Some(base), 8.0);
         assert_eq!(square.corner_shift, [(0.0, 0.0); 4]);
         assert!(pagecrop_core::geometry::frame_inside(square, base, 8.0));
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|n| (*n).to_owned()).collect()
+    }
+
+    #[test]
+    fn no_notice_for_a_clean_folder() {
+        assert_eq!(settings_notice("v.json", &[], true, &[]), None);
+        assert_eq!(settings_notice("v.json", &[], false, &[]), None);
+        assert_eq!(
+            settings_notice("v.json", &[], true, &names(&["old.json"])),
+            None
+        );
+    }
+
+    #[test]
+    fn dropped_parts_are_named() {
+        let dropped = names(&["page_003.jpg", "export"]);
+        assert_eq!(
+            settings_notice("v.json", &dropped, true, &[]).as_deref(),
+            Some(
+                "Some settings in v.json could not be read and were left out: page_003.jpg, export"
+            )
+        );
+    }
+
+    #[test]
+    fn long_drop_list_is_cut_after_five() {
+        let dropped = names(&["a", "b", "c", "d", "e", "f", "g"]);
+        assert_eq!(
+            settings_notice("v.json", &dropped, true, &[]).as_deref(),
+            Some(
+                "Some settings in v.json could not be read and were left out: a, b, c, d, e and 2 more"
+            )
+        );
+    }
+
+    #[test]
+    fn older_file_hint_only_without_current_file() {
+        let older = names(&["pagecrop.json", "pagecrop_v04.json"]);
+        assert_eq!(
+            settings_notice("v.json", &[], false, &older).as_deref(),
+            Some(
+                "This folder has settings from another pagecrop version (pagecrop.json). \
+                 To use them, copy the file to v.json and open the folder again."
+            )
+        );
+        assert_eq!(settings_notice("v.json", &[], true, &older), None);
+    }
+
+    #[test]
+    fn dropped_wins_over_older_hint() {
+        let dropped = names(&["page_002.jpg"]);
+        let older = names(&["pagecrop.json"]);
+        let text = settings_notice("v.json", &dropped, false, &older).unwrap_or_default();
+        assert!(text.contains("page_002.jpg"));
+        assert!(!text.contains("another pagecrop version"));
     }
 }
