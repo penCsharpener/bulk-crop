@@ -1,6 +1,6 @@
 //! Hit testing and dragging of the crop frame. All positions are frame fractions.
 
-use crate::geometry::{Size, fit_inside, frame_inside};
+use crate::geometry::{Size, fit_inside, frame_corners, frame_inside, quad_ok};
 use crate::model::CropRect;
 
 /// The part of the frame under the pointer: the whole frame, one of its four edges or corners.
@@ -17,7 +17,7 @@ pub enum Handle {
     SW,
 }
 
-/// The four edges of the frame: left, right, top, bottom.
+/// The four edges of the frame rectangle: left, right, top, bottom.
 fn edges(c: CropRect) -> (f32, f32, f32, f32) {
     (
         c.cx - c.w / 2.0,
@@ -32,36 +32,63 @@ fn clamp_to(v: f32, lo: f32, hi: f32) -> f32 {
     v.max(lo).min(hi)
 }
 
-/// Which handle is under `pos`. Corners are checked first, then edges, then the inside of the frame
-/// (`Move`). `tol` is the reach of a handle on each axis. Anything further out is `None`.
-pub fn hit_test(crop: CropRect, pos: (f32, f32), tol: (f32, f32)) -> Option<Handle> {
-    let (x, y) = pos;
-    let (left, right, top, bottom) = edges(crop);
-    let (tx, ty) = tol;
-    let near_left = (x - left).abs() <= tx;
-    let near_right = (x - right).abs() <= tx;
-    let near_top = (y - top).abs() <= ty;
-    let near_bottom = (y - bottom).abs() <= ty;
-    let within_x = x >= left - tx && x <= right + tx;
-    let within_y = y >= top - ty && y <= bottom + ty;
+/// Whether `pos` is within `tol` of `corner` on both axes.
+fn near_corner(pos: (f32, f32), corner: (f32, f32), tol: (f32, f32)) -> bool {
+    (pos.0 - corner.0).abs() <= tol.0 && (pos.1 - corner.1).abs() <= tol.1
+}
 
-    if near_left && near_top {
+/// Whether `pos` is on the edge from `a` to `b`, which is treated as running along the x axis: the
+/// pointer's x is within the corners' x range widened by `tol.0`, and its y within `tol.1` of the
+/// edge's y at that x. The edge's y is linear between the corners; when their x are equal it is the
+/// mean of their y.
+fn near_edge_x(pos: (f32, f32), a: (f32, f32), b: (f32, f32), tol: (f32, f32)) -> bool {
+    let within = pos.0 >= a.0.min(b.0) - tol.0 && pos.0 <= a.0.max(b.0) + tol.0;
+    let edge_y = if a.0 == b.0 {
+        (a.1 + b.1) / 2.0
+    } else {
+        a.1 + ((pos.0 - a.0) / (b.0 - a.0)).clamp(0.0, 1.0) * (b.1 - a.1)
+    };
+    within && (pos.1 - edge_y).abs() <= tol.1
+}
+
+/// The same for an edge running along the y axis: the axes swapped.
+fn near_edge_y(pos: (f32, f32), a: (f32, f32), b: (f32, f32), tol: (f32, f32)) -> bool {
+    let swap = |p: (f32, f32)| (p.1, p.0);
+    near_edge_x(swap(pos), swap(a), swap(b), (tol.1, tol.0))
+}
+
+/// Whether `pos` is inside the frame or on its outline: for each side, in the order NW, NE, SE, SW,
+/// the pointer is on the inner (right-hand, on screen) side of the line through it or on it.
+fn inside_frame(pos: (f32, f32), p: &[(f32, f32); 4]) -> bool {
+    (0..4).all(|i| {
+        let (from, to) = (p[i], p[(i + 1) % 4]);
+        (to.0 - from.0) * (pos.1 - from.1) - (to.1 - from.1) * (pos.0 - from.0) >= 0.0
+    })
+}
+
+/// Which handle is under `pos`. Corners are checked first, then edges, then the inside of the frame
+/// (`Move`). The frame is the real four-cornered shape (`geometry::frame_corners`). `tol` is the
+/// reach of a handle on each axis. Anything further out is `None`.
+pub fn hit_test(crop: CropRect, pos: (f32, f32), tol: (f32, f32)) -> Option<Handle> {
+    let p = frame_corners(crop);
+    let [nw, ne, se, sw] = p;
+    if near_corner(pos, nw, tol) {
         Some(Handle::NW)
-    } else if near_right && near_top {
+    } else if near_corner(pos, ne, tol) {
         Some(Handle::NE)
-    } else if near_left && near_bottom {
+    } else if near_corner(pos, sw, tol) {
         Some(Handle::SW)
-    } else if near_right && near_bottom {
+    } else if near_corner(pos, se, tol) {
         Some(Handle::SE)
-    } else if near_left && within_y {
+    } else if near_edge_y(pos, nw, sw, tol) {
         Some(Handle::W)
-    } else if near_right && within_y {
+    } else if near_edge_y(pos, ne, se, tol) {
         Some(Handle::E)
-    } else if near_top && within_x {
+    } else if near_edge_x(pos, nw, ne, tol) {
         Some(Handle::N)
-    } else if near_bottom && within_x {
+    } else if near_edge_x(pos, sw, se, tol) {
         Some(Handle::S)
-    } else if x >= left && x <= right && y >= top && y <= bottom {
+    } else if inside_frame(pos, &p) {
         Some(Handle::Move)
     } else {
         None
@@ -130,9 +157,9 @@ pub fn drag(
 }
 
 /// Like `drag`, but the frame also stays inside the turned picture (see `geometry::frame_inside`),
-/// so it never covers the white corners a fine angle leaves. A start frame that is not inside is
-/// fitted first. When the whole movement would leave the picture, the frame goes as far as it can,
-/// then slides along the edge on each axis alone.
+/// so it never covers the white corners a fine angle leaves, and stays a valid four-sided shape
+/// (`geometry::quad_ok`). A start frame that is not inside is fitted first. When the whole movement
+/// would break either, the frame goes as far as it can, then slides along the limit on each axis alone.
 pub fn drag_inside(
     start: CropRect,
     handle: Handle,
@@ -143,9 +170,55 @@ pub fn drag_inside(
 ) -> CropRect {
     let start = fit_inside(start, base, angle_deg);
     let at = |d: (f32, f32)| drag(start, handle, d, (0.5, 0.5), min);
-    let ok = |d: (f32, f32)| frame_inside(at(d), base, angle_deg);
+    let ok = |d: (f32, f32)| {
+        let frame = at(d);
+        frame_inside(frame, base, angle_deg) && quad_ok(frame)
+    };
+    at(reach_towards(ok, delta))
+}
+
+/// Moves one corner of the frame alone: its shift becomes the start shift plus `delta`, the total
+/// movement since the drag began. `start` is fitted first, like in `drag_inside`. The corner stays
+/// inside the turned picture and the frame stays a valid shape (`geometry::quad_ok`); where the
+/// movement would break either, the corner goes as far as it can, then slides along the limit on each
+/// axis alone. Any handle that is not a corner returns the fitted start unchanged.
+pub fn drag_corner(
+    start: CropRect,
+    handle: Handle,
+    delta: (f32, f32),
+    base: Size,
+    angle_deg: f32,
+) -> CropRect {
+    let start = fit_inside(start, base, angle_deg);
+    let index = match handle {
+        Handle::NW => 0,
+        Handle::NE => 1,
+        Handle::SE => 2,
+        Handle::SW => 3,
+        _ => return start,
+    };
+    let at = |d: (f32, f32)| {
+        let mut frame = start;
+        let (sx, sy) = start.corner_shift[index];
+        frame.corner_shift[index] = (sx + d.0, sy + d.1);
+        frame
+    };
+    let ok = |d: (f32, f32)| {
+        let frame = at(d);
+        frame_inside(frame, base, angle_deg) && quad_ok(frame)
+    };
+    at(reach_towards(ok, delta))
+}
+
+/// How much of `delta` can be applied while `ok` holds: all of it, or else the furthest point on the
+/// straight way there, then the furthest along x alone, then along y alone. `ok` must hold for no
+/// movement. A movement that is not finite counts as none.
+fn reach_towards(ok: impl Fn((f32, f32)) -> bool, delta: (f32, f32)) -> (f32, f32) {
+    if !(delta.0.is_finite() && delta.1.is_finite()) {
+        return (0.0, 0.0);
+    }
     if ok(delta) {
-        return at(delta);
+        return delta;
     }
     let t = furthest(|t| ok((delta.0 * t, delta.1 * t)));
     let mut reached = (delta.0 * t, delta.1 * t);
@@ -153,11 +226,12 @@ pub fn drag_inside(
     reached.0 += (delta.0 - reached.0) * tx;
     let ty = furthest(|s| ok((reached.0, reached.1 + (delta.1 - reached.1) * s)));
     reached.1 += (delta.1 - reached.1) * ty;
-    at(reached)
+    reached
 }
 
 /// The largest `t` in `0..=1` for which `ok(t)` holds. `ok(0)` must hold, and `ok` may switch from
-/// true to false only once; both are true here because the allowed region is convex.
+/// true to false only once; that holds for the frame limits here, which a straight movement leaves
+/// at most once.
 fn furthest(ok: impl Fn(f32) -> bool) -> f32 {
     if ok(1.0) {
         return 1.0;
@@ -406,5 +480,161 @@ mod tests {
     fn no_movement_keeps_start() {
         let a = spin_angle(2.3, ORIGIN, (100.0, 40.0), (100.0, 40.0), 15.0);
         assert!((a - 2.3).abs() < 1e-4, "a = {a}");
+    }
+
+    fn shifted(crop: CropRect, shift: [(f32, f32); 4]) -> CropRect {
+        CropRect {
+            corner_shift: shift,
+            ..crop
+        }
+    }
+
+    fn nw_shift(dx: f32, dy: f32) -> [(f32, f32); 4] {
+        [(dx, dy), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+    }
+
+    #[test]
+    fn hit_test_finds_a_shifted_corner() {
+        // NW is shifted from (-0.25, -0.25) to (-0.15, -0.2).
+        let f = shifted(frame(0.0, 0.0, 0.5, 0.5), nw_shift(0.1, 0.05));
+        assert_eq!(hit_test(f, (-0.15, -0.2), TOL), Some(Handle::NW));
+        assert_eq!(hit_test(f, (-0.14, -0.19), TOL), Some(Handle::NW));
+        assert_eq!(hit_test(f, (-0.25, -0.25), TOL), None);
+    }
+
+    #[test]
+    fn hit_test_follows_a_slanted_edge() {
+        // The N edge now runs from (-0.15, -0.15) to (0.25, -0.25); at x = 0.05 it is at y = -0.2.
+        let f = shifted(frame(0.0, 0.0, 0.5, 0.5), nw_shift(0.1, 0.1));
+        assert_eq!(hit_test(f, (0.05, -0.2), TOL), Some(Handle::N));
+        assert_eq!(hit_test(f, (0.05, -0.19), TOL), Some(Handle::N));
+        assert_ne!(hit_test(f, (0.05, -0.25), TOL), Some(Handle::N));
+    }
+
+    #[test]
+    fn hit_test_follows_a_slanted_side_edge() {
+        // The W edge runs from (-0.15, -0.25) to (-0.25, 0.25); at y = 0 it is at x = -0.2.
+        let f = shifted(frame(0.0, 0.0, 0.5, 0.5), nw_shift(0.1, 0.0));
+        assert_eq!(hit_test(f, (-0.2, 0.0), TOL), Some(Handle::W));
+        assert_ne!(hit_test(f, (-0.25, 0.0), TOL), Some(Handle::W));
+    }
+
+    #[test]
+    fn edge_with_equal_corner_x_is_hit_at_the_mean_y() {
+        // NW and NE both at x = 0 (not a valid frame, but hit_test must not divide by zero), at
+        // y -0.3 and -0.1: a point near the mean y is N.
+        let f = shifted(
+            frame(0.0, 0.0, 0.6, 0.6),
+            [(0.3, 0.0), (-0.3, 0.2), (0.0, 0.0), (0.0, 0.0)],
+        );
+        assert_eq!(hit_test(f, (0.0, -0.2), TOL), Some(Handle::N));
+        assert_ne!(hit_test(f, (0.0, -0.3), TOL), Some(Handle::N));
+    }
+
+    #[test]
+    fn inside_of_a_trapezoid_is_move() {
+        let f = shifted(
+            frame(0.0, 0.0, 0.6, 0.6),
+            [(0.1, 0.0), (-0.1, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        );
+        assert_eq!(hit_test(f, (0.0, 0.0), TOL), Some(Handle::Move));
+        assert_eq!(hit_test(f, (-0.15, -0.1), TOL), Some(Handle::Move));
+        // Inside the rectangle, but outside the slanted side.
+        assert_eq!(hit_test(f, (-0.28, -0.28), TOL), None);
+        assert_eq!(hit_test(f, (0.28, -0.28), TOL), None);
+    }
+
+    #[test]
+    fn corner_drag_moves_one_corner() {
+        let start = shifted(
+            frame(0.0, 0.0, 0.5, 0.5),
+            [(0.01, 0.0), (0.0, 0.02), (0.0, 0.0), (0.03, 0.0)],
+        );
+        let d = drag_corner(start, Handle::NE, (0.05, 0.03), base_1600(), 0.0);
+        assert!(close(d.corner_shift[1].0, 0.05), "{:?}", d.corner_shift);
+        assert!(close(d.corner_shift[1].1, 0.05), "{:?}", d.corner_shift);
+        for i in [0, 2, 3] {
+            assert_eq!(d.corner_shift[i], start.corner_shift[i], "corner {i}");
+        }
+        assert!(close(d.cx, 0.0) && close(d.cy, 0.0));
+        assert!(close(d.w, 0.5) && close(d.h, 0.5));
+    }
+
+    #[test]
+    fn corner_drag_stops_at_the_picture_edge() {
+        // NW starts shifted in by 0.1 on both axes; dragging it out by 0.3 can only reach the edge.
+        let start = shifted(CropRect::default(), nw_shift(0.1, 0.1));
+        let d = drag_corner(start, Handle::NW, (-0.3, -0.3), base_1600(), 0.0);
+        assert!(frame_inside(d, base_1600(), 0.0), "{d:?}");
+        assert!(d.corner_shift[0].0.abs() < 1e-3, "{:?}", d.corner_shift);
+        assert!(d.corner_shift[0].1.abs() < 1e-3, "{:?}", d.corner_shift);
+    }
+
+    #[test]
+    fn corner_drag_never_dents_the_frame() {
+        // NE and SW sit close to the middle, so the NE-SW diagonal is x + y = 0.28.
+        let start = shifted(
+            frame(0.0, 0.0, 0.6, 0.6),
+            [(0.0, 0.0), (0.0, 0.28), (0.0, 0.0), (0.28, 0.0)],
+        );
+        assert!(quad_ok(start));
+        let d = drag_corner(start, Handle::SE, (-0.4, -0.4), base_1600(), 0.0);
+        assert!(quad_ok(d), "{d:?}");
+        let se = frame_corners(d)[2];
+        assert!(se.0 + se.1 > 0.28 - 1e-3, "SE at {se:?}");
+        assert!(d.corner_shift[2].0 < -0.1, "SE should have moved in");
+    }
+
+    #[test]
+    fn corner_drag_slides_along_the_limit() {
+        // NW already sits at the left edge; moving it left is refused, moving it down is not.
+        let d = drag_corner(
+            CropRect::default(),
+            Handle::NW,
+            (-0.2, 0.1),
+            base_1600(),
+            0.0,
+        );
+        assert!(frame_inside(d, base_1600(), 0.0), "{d:?}");
+        assert!(d.corner_shift[0].0 > -1e-3, "{:?}", d.corner_shift);
+        assert!(close(d.corner_shift[0].1, 0.1), "{:?}", d.corner_shift);
+    }
+
+    #[test]
+    fn plain_drag_keeps_the_shift() {
+        let start = shifted(
+            frame(0.0, 0.0, 0.6, 0.6),
+            [(0.05, 0.0), (0.0, 0.02), (0.0, 0.0), (0.0, 0.01)],
+        );
+        let d = drag_inside(start, Handle::W, (0.1, 0.0), base_1600(), 0.0, MIN);
+        assert!(close(d.w, 0.5), "w = {}", d.w);
+        assert_eq!(d.corner_shift, start.corner_shift);
+    }
+
+    #[test]
+    fn plain_drag_stops_before_crossing_corners() {
+        // NW is shifted 0.25 to the right. Shrinking from the W edge by 0.2 would push it past the
+        // frame's centre line; the drag stops at 0.1.
+        let start = shifted(frame(0.0, 0.0, 0.6, 0.6), nw_shift(0.25, 0.0));
+        assert!(quad_ok(start));
+        let d = drag_inside(start, Handle::W, (0.2, 0.0), base_1600(), 0.0, MIN);
+        assert!(quad_ok(d), "{d:?}");
+        assert!(close_to(d.w, 0.5, 1e-3), "w = {}", d.w);
+    }
+
+    #[test]
+    fn edge_handle_in_drag_corner_changes_nothing() {
+        let start = shifted(
+            frame(0.0, 0.0, 0.5, 0.5),
+            [(0.01, 0.0), (0.0, 0.02), (0.0, 0.0), (0.03, 0.0)],
+        );
+        for handle in [Handle::N, Handle::S, Handle::E, Handle::W, Handle::Move] {
+            let d = drag_corner(start, handle, (0.1, 0.1), base_1600(), 0.0);
+            assert_eq!(d, start, "{handle:?}");
+        }
+    }
+
+    fn close_to(a: f32, b: f32, tol: f32) -> bool {
+        (a - b).abs() < tol
     }
 }
