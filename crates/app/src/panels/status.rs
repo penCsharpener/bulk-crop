@@ -1,7 +1,7 @@
 //! Bottom status bar: the page position, name, full size, crop frame size and export size, any
 //! error from opening a folder, and the outcome of saving.
 
-use pagecrop_core::geometry::{Size, base_size, output_size};
+use pagecrop_core::geometry::{Resize, Size, base_size, output_size};
 
 use crate::app::{App, Content};
 
@@ -12,11 +12,12 @@ pub fn show(app: &App, ui: &mut egui::Ui) {
             if let Some(error) = &app.error {
                 ui.colored_label(egui::Color32::RED, error);
             }
-            if let Some(notice) = &app.notice {
-                ui.label(notice);
-            }
             save_status(app, ui);
         });
+        // On its own line and wrapped, because a settings hint is longer than the window is wide.
+        if let Some(notice) = &app.notice {
+            ui.add(egui::Label::new(notice).wrap());
+        }
     });
 }
 
@@ -69,7 +70,8 @@ fn full_size_of_selected(app: &App) -> Option<(u32, u32)> {
     }
 }
 
-/// The crop frame's size in source pixels, and the size the export will give it.
+/// The crop frame's size in source pixels (for a four-cornered frame, the mean of opposite edges),
+/// and the size the export will give it.
 fn frame_text(app: &App, full_size: (u32, u32)) -> String {
     let adjust = app.effective();
     let base = base_size(
@@ -79,8 +81,7 @@ fn frame_text(app: &App, full_size: (u32, u32)) -> String {
         },
         adjust.quarter_turns,
     );
-    let w = (adjust.crop.w * base.w).round().max(1.0) as u32;
-    let h = (adjust.crop.h * base.h).round().max(1.0) as u32;
+    let (w, h) = output_size(base, adjust.crop, Resize::None);
     let (out_w, out_h) = output_size(base, adjust.crop, app.export_dialog.resize());
     format!(" · frame {w}×{h} → {out_w}×{out_h}")
 }
