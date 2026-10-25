@@ -248,7 +248,7 @@ land on (0, −3), (0, −1), (0, 3), one straight line. For the rectangle (−4
 | ✅ 0005.3 | **Straightening render, keystoned test pages** (core + testkit + command line). Skills: image-geometry, image-io.<br>`render.rs`: `rotate_crop` through `SquareToQuad` as described.<br>Testkit: `pub fn keystone_image(w: u32, h: u32, index: u32, squeeze: f32) -> RgbImage`: one page on the table like `page_image` (same colours, text lines and markers), photographed from below: the page is 0.8·h high and centred; its bottom edge is 0.7·w wide and its top edge `0.7·w·(1 − squeeze)`, the sides straight. For a pixel, `v = (y + 0.5 − 0.1·h) / (0.8·h)`, the half width at that row `0.35·w·(1 − squeeze·(1 − v))`, `u = (x + 0.5 − w/2) / (2 · half) + 0.5`; outside `0..=1` on either is table. `pub fn write_keystone_book(dir: &Path, count: u32, w: u32, h: u32, squeeze: f32) -> std::io::Result<Vec<PathBuf>>`: like `write_book` with every page from `keystone_image`.<br>CLI: `render` gains `--corners nwx,nwy,nex,ney,sex,sey,swx,swy` (eight numbers, default all zero, parsed like `--crop`; a frame for which `quad_ok` is false is an error naming the option). `gen-fixtures` gains `--keystone <squeeze>`, conflicting with `--drift`, `--reverse-mtime` and `--two-sided`, which calls `write_keystone_book`.<br>Test in testkit: `keystone_top_is_narrower` (squeeze 0.2 on 800 × 600: the pixel at (0.5·w − 0.33·w, 0.12·h) is table, the one at (0.5·w − 0.33·w, 0.88·h) is page).<br>Tests in `render.rs`: `keystoned_page_fills_the_frame` (in memory: `keystone_image(800, 600, 0, 0.2)`, frame (0, 0, 0.66, 0.76) with NW shift (0.068, 0) and NE shift (−0.068, 0); every pixel of the first and last row and column of `render_rgb(…, Resize::None)` is page colour, red channel > 200; the same frame without shift has a top corner of table colour, red < 100); `shifted_render_has_output_size` (the render's dimensions equal `output_size`); `no_shift_render_is_unchanged` (a gradient rendered with a fine angle and a crop gives the same pixels as with `corner_shift` explicitly zero — a guard for the refactor). | 0005.2 | `cargo test --workspace` is green with the four new tests. `cargo run -p pagecrop-cli -- gen-fixtures samples/keystone --keystone 0.2 --count 6` writes six trapezoid pages. `cargo run -p pagecrop-cli -- render samples/keystone/page_001.jpg --out samples/keystone-straight.jpg --crop 0,0,0.66,0.76 --corners 0.068,0,-0.068,0,0,0,0,0` writes a picture whose page fills it, with straight, parallel edges and level text lines (look at it). Crossed corners are rejected with a clear message. |
 | ✅ 0005.4 | **Hit test and corner drag on four corners** (core). Skill: image-geometry. Read "Editing the four corners".<br>`crop_edit.rs`: `hit_test` on the real corners as described (same signature). `drag_inside` also requires `quad_ok` in its `ok`. Move the "go as far as it can, then slide on each axis" part of `drag_inside` into a private `fn reach_towards(ok: impl Fn((f32, f32)) -> bool, delta: (f32, f32)) -> (f32, f32)` and use it in both. New `pub fn drag_corner(start: CropRect, handle: Handle, delta: (f32, f32), base: Size, angle_deg: f32) -> CropRect`: `start` is fitted first like in `drag_inside`; for NW, NE, SE, SW the shift of that corner becomes the start shift plus `delta`, kept to `frame_inside` and `quad_ok` with `reach_towards`; any other handle returns the fitted start unchanged.<br>Tests: every existing `crop_edit` test stays green unchanged except literal fixes. New: `hit_test_finds_a_shifted_corner` (NW shifted (0.1, 0.05): the old rectangle corner is no longer NW, the shifted point is); `hit_test_follows_a_slanted_edge` (N edge from a shifted NW to NE: a point on the slanted line is N, a point on the old straight top line far from it is not); `inside_of_a_trapezoid_is_move`; `corner_drag_moves_one_corner` (the other three shifts and `cx, cy, w, h` are unchanged); `corner_drag_stops_at_the_picture_edge` (full-size frame at 0°, dragging NW outwards leaves it at the edge, `frame_inside` holds); `corner_drag_never_dents_the_frame` (dragging SE far inwards past the NE–SW diagonal stops while `quad_ok` still holds); `corner_drag_slides_along_the_limit`; `plain_drag_keeps_the_shift` (a W drag of a shifted frame keeps `corner_shift`); `plain_drag_stops_before_crossing_corners` (a frame with large inward NW shift: shrinking it from the W edge stops while `quad_ok` holds); `edge_handle_in_drag_corner_changes_nothing`. | 0005.2 | `cargo test -p pagecrop-core crop_edit` is green with the ten new tests and the existing ones. |
 | ✅ 0005.4f | **Ctrl + drag in the editor** (screen). Skills: egui-app, image-geometry. Read "Editing the four corners".<br>`app.rs`: `Drag` gains `pub corner: bool`; a corner drag calls `drag_corner`, any other `drag_inside` as today.<br>`editor.rs`: `Layout::frame_points(crop) -> [egui::Pos2; 4]` (NW, NE, SE, SW on screen from `frame_corners`); `frame_rect` becomes the bounding box of those points. `paint_frame` draws: the shade as one `egui::Mesh` ring between the frame and a rectangle that contains both `area` and the frame (two triangles per side: outer i, outer i+1, inner i+1 and outer i, inner i+1, inner i, with both rings in the order NW, NE, SE, SW), the outline as a `closed_line` (dark 2.5, then white 1.5 on top), the grid lines from `SquareToQuad` built on the screen points (line `k` from `apply(k/8, 0)` to `apply(k/8, 1)`, and the same across), the corner handles at the points and the edge handles at the middle of each edge (`handle_points` takes the four points). `handle_pointer`: on press, Ctrl held (`modifiers.command`) and a corner handle hit start a corner drag. The cursor is `Crosshair` while Ctrl is held over a corner and during a corner drag; otherwise as today.<br>`panels/adjust.rs`: the "Square corners" button as described, with the hover text "Ctrl + drag a corner of the frame to follow a page photographed at an angle; the export straightens it. This makes the frame a rectangle again."<br>`help.rs`: `("Ctrl + drag a frame corner", "Move that corner alone, for a page shot at an angle")`, after the line for dragging a handle. `README.md`: the framing step of the workflow gets two sentences on Ctrl + drag and Square corners, and the shortcuts table the new line. | 0005.3, 0005.4 | `cargo run -p pagecrop-cli -- gen-fixtures samples/keystone --keystone 0.2`, then `cargo run -p pagecrop -- samples/keystone`. Ctrl + drag the NW and the NE handle onto the page's top corners: the frame becomes a trapezoid, the shade follows its slanted edges, the grid lines lean with the page's sides. P shows a straight page with no table at its edges. Pages 2–12 show the same frame. A plain drag on the W edge moves that slanted edge; Move moves the trapezoid; the spin handle turns it and it stays inside. Ctrl + drag beyond the photo stops at its edge; dragging a corner across the frame stops before the shape folds. Ctrl+Z undoes one corner drag at a time. ⟳ 90° keeps the corners on the same page corners. Square corners gives a rectangle, and Ctrl+Z gives the trapezoid back. Restart: the trapezoid is still there, and `pagecrop_v05.json` holds `corner_shift`. Export: the pictures are straight pages. |
-| 0005.5 | **Final check on a keystoned two-sided book** (no code unless a bug turns up; a bug fix gets its own commit `0005.5: fix …`).<br>Make `samples/final5` with `gen-fixtures --keystone 0.15 --count 20`. In the app: set a trapezoid on page 1; turn on alternating on page 1 and give page 2 a different trapezoid; turn page 9 by 90° and back; brighten +20; delete one photo; export. Then copy a 0.4-style `pagecrop.json` (write one by hand with two keys, one of them with a wrong type) into a fresh copy of the folder as `pagecrop_v05.json` and open it.<br>Write the findings, including anything awkward, as a short list at the end of this file under "## Results of 0005.5". | 0005.1f, 0005.4f | All exports exist, none shows table colour at its edges, odd and even pages carry their own trapezoid. The copied file gives the readable key, the notice names the other, and nothing in the photo folder changed except `pagecrop_v05.json` and the one photo in the trash. |
+| ✅ 0005.5 | **Final check on a keystoned two-sided book** (no code unless a bug turns up; a bug fix gets its own commit `0005.5: fix …`).<br>Make `samples/final5` with `gen-fixtures --keystone 0.15 --count 20`. In the app: set a trapezoid on page 1; turn on alternating on page 1 and give page 2 a different trapezoid; turn page 9 by 90° and back; brighten +20; delete one photo; export. Then copy a 0.4-style `pagecrop.json` (write one by hand with two keys, one of them with a wrong type) into a fresh copy of the folder as `pagecrop_v05.json` and open it.<br>Write the findings, including anything awkward, as a short list at the end of this file under "## Results of 0005.5". | 0005.1f, 0005.4f | All exports exist, none shows table colour at its edges, odd and even pages carry their own trapezoid. The copied file gives the readable key, the notice names the other, and nothing in the photo folder changed except `pagecrop_v05.json` and the one photo in the trash. |
 
 ## Risks
 
@@ -273,3 +273,66 @@ land on (0, −3), (0, −1), (0, 3), one straight line. For the rectangle (−4
 - Finding the page corners automatically.
 - Typing a known page size or ratio for the output.
 - A migration tool for older settings files.
+
+## Results of 0005.5
+
+Run on `samples/final5` (`gen-fixtures --keystone 0.15 --count 20`), debug build (the workspace sets
+`opt-level` for dev), Xvfb without a window manager, driven with xdotool, with its own `HOME` so the
+trash could be inspected. Every step was done in the GUI; `pagecrop_v05.json` was never edited by hand.
+The keystone fixture is one-sided, so page 2 got a different trapezoid by hand, as the row allows.
+Screenshots and the check scripts are in the session scratch folder, not in the repo.
+
+- **Done when, all met.** 19 exports exist (`19 written, 0 skipped, 0 failed`; 20 photos minus the
+  trashed one). In the outer 20 pixels of every export, beyond a 3-pixel fringe, no pixel has a solid
+  5 × 5 block of table colour (red 40, or 58 after +20). The same check finds 32524 such pixels in an
+  unstraightened render of page 1, so it does fire. With no fringe at all it also finds none. Looked
+  at pages 1–4, 9, 10, 15 and 19 as a montage: straight pages, no table at any edge.
+- **Odd and even pages carry their own trapezoid.** Page 1 got four Ctrl + drags (NW, NE, SE, SW) onto
+  the page's corners, then alternating sides was turned on. Page 2 first showed page 1's trapezoid
+  (side B, "Follows page 1"); four more Ctrl + drags gave it a smaller one. Pages 3 and 4 then showed
+  the trapezoids of page 1 and page 2 again. In the exports every odd page is 1021 × 942 and every
+  even page 897 × 840, and the first text line starts at y 179 on all odd and y 123 on all even
+  exports. Text lines are level: the first line starts on the same row at the left and the right end
+  of every export. P showed a straight page with no table.
+- **Turn and back on page 9.** R then Shift+R: while turned, the trapezoid sat on the turned page's
+  corners (frame 942 × 1021); turned back, the frame is 1021 × 942 again and the corners are on the
+  same spots. Page 9 got its own key; `pagecrop_v05.json` holds three keys (pages 1, 2, 9), each with
+  `corner_shift` and `alternate: true`.
+- **Brightness +20** was set on page 9. Ink in the exports is 29 on pages 1–8 and 46 on pages 9–20,
+  so the setting reached the pages after page 9 and not before it. Page 10 (side B) shows page 2's
+  trapezoid with page 9's tone, "Follows page 9 · side B".
+- **Delete.** Page 14 was moved to the trash after the dialog; `page_014.jpg` is in `Trash/files` of
+  the scratch `HOME` with the same checksum as before, and the list says 19 pages. The old page 15
+  (now 14) is labelled B, so the sides are repaired as in 0002.5f, and its export is 897 × 840.
+- **Photo folder untouched.** `sha256sum` of the 19 remaining photos equals the list taken before the
+  start, and their modification times are unchanged. The only new entries are `pagecrop_v05.json` and
+  the export folder `cropped/` (the default output folder, inside the photo folder as the README says).
+  No `.tmp` file is left behind.
+- **Copied 0.4-style file.** In a fresh copy of the 20 photos, a hand-written `pagecrop.json`
+  (`"version": 1`, a key for `page_003.jpg` with 1.5° and brightness 10 and a frame without
+  `corner_shift`, a key for `page_005.jpg` with `"brightness": "loud"`) was copied to
+  `pagecrop_v05.json`. The status bar says `Some settings in pagecrop_v05.json could not be read and
+  were left out: page_005.jpg`. Page 3 has the dot, 1.5°, brightness 10 and a 1120 × 960 rectangle
+  frame (`Square corners` greyed out); page 5 says "Follows page 3" and shows the same settings. After
+  closing, `sha256sum` of every file in that folder, including both json files, is unchanged.
+- **Awkward: the notice stays.** The dropped-settings notice stays in the status bar while moving
+  between pages and is on a second line under the page line. It is cleared only by another notice or
+  a new folder. Not a bug; it is what 0005.1f asked for.
+- **Awkward: page label of an alternating page.** Page 3 (side A) says "Follows page 2 · side A",
+  although its frame and angle come from page 1; "page 2" is the nearest key, which supplies the tone.
+  Page 10 says "Follows page 9 · side B" for the same reason. The text is not wrong about the tone but
+  can mislead about the frame.
+- **Awkward: tone is not part of a side.** As in 0002.6, +20 set on page 9 starts at page 9 and not at
+  page 1. Setting it on page 1 would not have reached pages 2 and 9, which have their own keys.
+- **Awkward: fixture pages 18–20 are the same picture.** `gen-fixtures` draws one marker square per
+  page index, and from page 18 on the squares run out of the page, so the three files have the same
+  checksum. It does not matter for this check.
+- **Awkward: a smaller frame cuts the marker row.** My even-page trapezoid starts below the top of the
+  page, so the dark marker squares are cut by the top edge (and the 17th square sits in the top right
+  corner of exports 17 and 19). That is ink on the page, not table; looked at to be sure.
+- **Not checked: Ctrl+E on the first try.** The first `xdotool key ctrl+e` did not open the export
+  window; a second one, sent as key down, key, key up with pauses, did. It is most likely xdotool's
+  timing, but I did not test it on a real keyboard.
+- **Not checked:** the export on an optimised build, a real photo, and Ctrl + drag with a trackpad or
+  on a high-DPI screen.
+- No bug found, so no fix commit.
