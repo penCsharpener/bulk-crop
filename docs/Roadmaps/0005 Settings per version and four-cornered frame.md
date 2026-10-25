@@ -212,7 +212,9 @@ land on (0, −3), (0, −1), (0, 3), one straight line. For the rectangle (−4
   slides along the limit on each axis alone, exactly as `drag_inside` does for the rectangle.
 - Plain drags are unchanged: Move moves the rectangle, an edge moves the rectangle's edge, a corner
   handle resizes the rectangle. The shifts are kept, so the shape moves and stretches with it. A plain
-  drag also stops where the frame would no longer be valid.
+  drag also stops where the frame would no longer be valid. The rectangle itself may reach past the
+  picture by as much as the corners are shifted (row 0005.4 fix): with the corners pulled in from a
+  full-picture frame, Move must still move the shape. `frame_inside` limits the real corners.
 - `hit_test` works on the four real corners:
   1. Corners first, in the order NW, NE, SW, SE as today: the pointer is within `tol` of a corner
      point on both axes.

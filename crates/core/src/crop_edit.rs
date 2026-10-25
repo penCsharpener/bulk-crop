@@ -169,7 +169,16 @@ pub fn drag_inside(
     min: (f32, f32),
 ) -> CropRect {
     let start = fit_inside(start, base, angle_deg);
-    let at = |d: (f32, f32)| drag(start, handle, d, (0.5, 0.5), min);
+    // The rectangle may reach past the picture by as much as its corners are shifted, so a frame
+    // whose corners are pulled in can still move; `frame_inside` below keeps the real corners inside.
+    // Without shift this is the picture itself.
+    let half = start
+        .corner_shift
+        .iter()
+        .fold((0.5f32, 0.5f32), |(hx, hy), &(dx, dy)| {
+            (hx.max(0.5 + dx.abs()), hy.max(0.5 + dy.abs()))
+        });
+    let at = |d: (f32, f32)| drag(start, handle, d, half, min);
     let ok = |d: (f32, f32)| {
         let frame = at(d);
         frame_inside(frame, base, angle_deg) && quad_ok(frame)
@@ -632,6 +641,36 @@ mod tests {
             let d = drag_corner(start, handle, (0.1, 0.1), base_1600(), 0.0);
             assert_eq!(d, start, "{handle:?}");
         }
+    }
+
+    #[test]
+    fn trapezoid_on_a_full_frame_can_move() {
+        // The rectangle fills the picture; the corners are pulled in by 0.1, so the frame has room.
+        let start = shifted(
+            frame(0.0, 0.0, 1.0, 1.0),
+            [(0.1, 0.1), (-0.1, 0.1), (-0.1, -0.1), (0.1, -0.1)],
+        );
+        let d = drag_inside(start, Handle::Move, (0.05, -0.03), base_1600(), 0.0, MIN);
+        assert!(close(d.cx, 0.05) && close(d.cy, -0.03), "{d:?}");
+        assert_eq!(d.corner_shift, start.corner_shift);
+        let far = drag_inside(start, Handle::Move, (0.5, 0.0), base_1600(), 0.0, MIN);
+        assert!(close_to(far.cx, 0.1, 1e-3), "cx = {}", far.cx);
+        assert!(frame_inside(far, base_1600(), 0.0));
+    }
+
+    #[test]
+    fn edge_of_a_trapezoid_can_go_past_its_rectangle_limit() {
+        let start = shifted(
+            frame(0.0, 0.0, 1.0, 1.0),
+            [(0.1, 0.0), (0.0, 0.0), (0.0, 0.0), (0.1, 0.0)],
+        );
+        let d = drag_inside(start, Handle::W, (-0.05, 0.0), base_1600(), 0.0, MIN);
+        assert!(
+            close(d.cx - d.w / 2.0, -0.55),
+            "left = {}",
+            d.cx - d.w / 2.0
+        );
+        assert!(frame_inside(d, base_1600(), 0.0));
     }
 
     fn close_to(a: f32, b: f32, tol: f32) -> bool {
