@@ -133,6 +133,7 @@ fn parse_crop(text: &str) -> Result<CropRect, String> {
             cy: *cy,
             w: *w,
             h: *h,
+            ..CropRect::default()
         }),
         _ => Err("expected four numbers: cx,cy,w,h".to_owned()),
     }

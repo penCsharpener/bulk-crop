@@ -121,7 +121,13 @@ mod tests {
 
     fn crop_only(cx: f32, cy: f32, w: f32, h: f32) -> Adjust {
         Adjust {
-            crop: CropRect { cx, cy, w, h },
+            crop: CropRect {
+                cx,
+                cy,
+                w,
+                h,
+                ..CropRect::default()
+            },
             ..Adjust::default()
         }
     }
@@ -168,6 +174,7 @@ mod tests {
             cy: 0.0,
             w: 0.66,
             h: 0.76,
+            ..CropRect::default()
         };
         let straight = render_rgb(
             &img,

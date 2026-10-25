@@ -53,8 +53,99 @@ pub fn half_extents(base: Size, angle_deg: f32) -> (f32, f32) {
 /// edge still counts as inside after rounding.
 const INSIDE_EPS: f32 = 1e-4;
 
-/// The four corners of a frame as signs: left/right, top/bottom.
-const CORNERS: [(f32, f32); 4] = [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
+/// The four corners of the frame, NW, NE, SE, SW, in fractions of the base picture from its centre:
+/// the rectangle's corners plus `corner_shift`.
+pub fn frame_corners(crop: CropRect) -> [(f32, f32); 4] {
+    let (hw, hh) = (crop.w / 2.0, crop.h / 2.0);
+    let signs = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+    let mut out = [(0.0, 0.0); 4];
+    for ((o, (sx, sy)), (dx, dy)) in out.iter_mut().zip(signs).zip(crop.corner_shift) {
+        *o = (crop.cx + sx * hw + dx, crop.cy + sy * hh + dy);
+    }
+    out
+}
+
+/// Whether the frame's four corners make a shape the export can straighten: every corner stays in
+/// its own quarter around the rectangle's centre (NW up and left of it, and so on), and the shape is
+/// strictly convex. Non-finite values are not valid.
+pub fn quad_ok(crop: CropRect) -> bool {
+    let p = frame_corners(crop);
+    let finite = p.iter().all(|c| c.0.is_finite() && c.1.is_finite())
+        && crop.cx.is_finite()
+        && crop.cy.is_finite();
+    if !finite {
+        return false;
+    }
+    let (cx, cy) = (crop.cx, crop.cy);
+    let quarters = p[0].0 < cx
+        && p[0].1 < cy
+        && p[1].0 > cx
+        && p[1].1 < cy
+        && p[2].0 > cx
+        && p[2].1 > cy
+        && p[3].0 < cx
+        && p[3].1 > cy;
+    quarters
+        && (0..4).all(|i| {
+            let (prev, here, next) = (p[(i + 3) % 4], p[i], p[(i + 1) % 4]);
+            let (ax, ay) = (here.0 - prev.0, here.1 - prev.1);
+            let (bx, by) = (next.0 - here.0, next.1 - here.1);
+            ax * by - ay * bx > 0.0
+        })
+}
+
+/// The projective map from the unit square onto a four-sided shape: (0, 0) goes to the first corner,
+/// (1, 0) to the second, (1, 1) to the third and (0, 1) to the fourth, so NW, NE, SE, SW. Straight
+/// lines stay straight. For a rectangle or a parallelogram it is the plain linear map.
+/// After Heckbert, "Fundamentals of Texture Mapping", 1989.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SquareToQuad {
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    e: f32,
+    f: f32,
+    g: f32,
+    h: f32,
+}
+
+impl SquareToQuad {
+    /// The map onto `corners`, given NW, NE, SE, SW in any unit. A shape with three corners on one
+    /// line has no such map; it gets the linear map instead, and `quad_ok` keeps such frames out of
+    /// the settings.
+    pub fn new(corners: [(f32, f32); 4]) -> SquareToQuad {
+        let [(x0, y0), (x1, y1), (x2, y2), (x3, y3)] = corners;
+        let (sx, sy) = (x0 - x1 + x2 - x3, y0 - y1 + y2 - y3);
+        let (dx1, dy1) = (x1 - x2, y1 - y2);
+        let (dx2, dy2) = (x3 - x2, y3 - y2);
+        let den = dx1 * dy2 - dx2 * dy1;
+        let (g, h) = if den == 0.0 {
+            (0.0, 0.0)
+        } else {
+            ((sx * dy2 - dx2 * sy) / den, (dx1 * sy - sx * dy1) / den)
+        };
+        SquareToQuad {
+            a: x1 - x0 + g * x1,
+            b: x3 - x0 + h * x3,
+            c: x0,
+            d: y1 - y0 + g * y1,
+            e: y3 - y0 + h * y3,
+            f: y0,
+            g,
+            h,
+        }
+    }
+
+    /// Where the point (`s`, `t`) of the unit square lands.
+    pub fn apply(&self, s: f32, t: f32) -> (f32, f32) {
+        let w = self.g * s + self.h * t + 1.0;
+        (
+            (self.a * s + self.b * t + self.c) / w,
+            (self.d * s + self.e * t + self.f) / w,
+        )
+    }
+}
 
 /// Turns an offset from the picture centre back by the fine angle, the same way `frame_to_src` does.
 fn turn_back(angle_deg: f32) -> impl Fn(f32, f32) -> (f32, f32) {
@@ -72,17 +163,17 @@ pub fn point_inside(p: (f32, f32), base: Size, angle_deg: f32) -> bool {
     upright && turned
 }
 
-/// Whether all four corners of the frame are inside (see `point_inside`).
+/// Whether all four corners of the frame, shifts included, are inside (see `point_inside`).
 pub fn frame_inside(crop: CropRect, base: Size, angle_deg: f32) -> bool {
-    CORNERS.iter().all(|&(sx, sy)| {
-        let corner = (crop.cx + sx * crop.w / 2.0, crop.cy + sy * crop.h / 2.0);
-        point_inside(corner, base, angle_deg)
-    })
+    frame_corners(crop)
+        .iter()
+        .all(|&corner| point_inside(corner, base, angle_deg))
 }
 
 /// The frame shrunk about its centre, keeping its shape, until it lies inside the upright base
-/// rectangle and inside the picture turned by `angle_deg`. A frame already inside comes back
-/// unchanged; the frame never grows. A frame whose centre is outside is first moved to the middle.
+/// rectangle and inside the picture turned by `angle_deg`. The size and the corner shifts shrink by
+/// the same factor. A frame already inside comes back unchanged; the frame never grows. A frame
+/// whose centre is outside is first moved to the middle.
 pub fn fit_inside(crop: CropRect, base: Size, angle_deg: f32) -> CropRect {
     let crop = if point_inside((crop.cx, crop.cy), base, angle_deg) {
         crop
@@ -93,11 +184,12 @@ pub fn fit_inside(crop: CropRect, base: Size, angle_deg: f32) -> CropRect {
             ..crop
         }
     };
+    let offsets = frame_corners(crop).map(|(x, y)| (x - crop.cx, y - crop.cy));
     let mut s: f32 = 1.0;
-    // Upright rectangle: |c ± s·half| <= 0.5 on each axis.
-    for (c, half) in [(crop.cx, crop.w / 2.0), (crop.cy, crop.h / 2.0)] {
-        if half > 0.0 {
-            s = s.min((0.5 - c.abs()) / half);
+    // Upright rectangle: c + s·v must stay within -0.5..=0.5 for every corner and axis.
+    for &(vx, vy) in &offsets {
+        for (u, v) in [(crop.cx, vx), (crop.cy, vy)] {
+            s = s.min(reach(u, v, 0.5));
         }
     }
     // Turned picture, in pixels: u + s·v must stay within -l..=l for every corner and axis,
@@ -105,28 +197,53 @@ pub fn fit_inside(crop: CropRect, base: Size, angle_deg: f32) -> CropRect {
     let turn = turn_back(angle_deg);
     let (ux, uy) = turn(crop.cx * base.w, crop.cy * base.h);
     let (lx, ly) = (base.w / 2.0, base.h / 2.0);
-    for (sx, sy) in CORNERS {
-        let (vx, vy) = turn(sx * crop.w * base.w / 2.0, sy * crop.h * base.h / 2.0);
+    for &(vx, vy) in &offsets {
+        let (vx, vy) = turn(vx * base.w, vy * base.h);
         for (u, v, l) in [(ux, vx, lx), (uy, vy, ly)] {
-            if v > 1e-6 {
-                s = s.min((l - u) / v);
-            } else if v < -1e-6 {
-                s = s.min((-l - u) / v);
-            }
+            s = s.min(reach(u, v, l));
         }
     }
     let s = s.clamp(0.0, 1.0);
     CropRect {
         w: crop.w * s,
         h: crop.h * s,
+        corner_shift: crop.corner_shift.map(|(dx, dy)| (dx * s, dy * s)),
         ..crop
     }
 }
 
+/// The largest factor `s` for which `u + s·v` stays within `-l..=l`, given `u` inside it. A `v` of
+/// (nearly) zero puts no limit on `s`.
+fn reach(u: f32, v: f32, l: f32) -> f32 {
+    if v > 1e-6 {
+        (l - u) / v
+    } else if v < -1e-6 {
+        (-l - u) / v
+    } else {
+        f32::INFINITY
+    }
+}
+
+/// The frame measured in pixels as a rectangle: the width is the mean of the top edge (NW to NE) and
+/// the bottom edge (SW to SE), the height the mean of the left edge (NW to SW) and the right edge
+/// (NE to SE). With no shift this is `w · base.w` and `h · base.h`.
+fn frame_pixels(base: Size, crop: CropRect) -> (f32, f32) {
+    let [nw, ne, se, sw] = crop.corner_shift;
+    // The edge vectors in pixels. Written from `w` and `h` and the shifts, not from the corner
+    // points, so a frame without shift measures exactly `w · base.w` and `h · base.h`.
+    let length = |dx: f32, dy: f32| (dx * base.w).hypot(dy * base.h);
+    let top = length(crop.w + ne.0 - nw.0, ne.1 - nw.1);
+    let bottom = length(crop.w + se.0 - sw.0, se.1 - sw.1);
+    let left = length(sw.0 - nw.0, crop.h + sw.1 - nw.1);
+    let right = length(se.0 - ne.0, crop.h + se.1 - ne.1);
+    ((top + bottom) / 2.0, (left + right) / 2.0)
+}
+
 /// The output size of the cropped picture. The picture is never enlarged.
 pub fn output_size(base: Size, crop: CropRect, resize: Resize) -> (u32, u32) {
-    let mid_w = (crop.w * base.w).round().max(1.0);
-    let mid_h = (crop.h * base.h).round().max(1.0);
+    let (frame_w, frame_h) = frame_pixels(base, crop);
+    let mid_w = frame_w.round().max(1.0);
+    let mid_h = frame_h.round().max(1.0);
     let scale = match resize {
         Resize::None => 1.0,
         Resize::LongEdge(n) => (n as f32 / mid_w.max(mid_h)).min(1.0),
@@ -139,10 +256,19 @@ pub fn output_size(base: Size, crop: CropRect, resize: Resize) -> (u32, u32) {
 }
 
 /// Turns the adjustment by one quarter turn, clockwise or counter-clockwise. The crop frame turns
-/// with the picture, so the same part of the page stays framed.
+/// with the picture, so the same part of the page stays framed. Each corner moves to the next place
+/// (clockwise NW → NE → SE → SW → NW) and its shift turns with it.
 pub fn quarter_turn(a: Adjust, clockwise: bool) -> Adjust {
     let c = a.crop;
     let current = a.quarter_turns % 4;
+    let mut corner_shift = [(0.0, 0.0); 4];
+    for (i, &(dx, dy)) in c.corner_shift.iter().enumerate() {
+        if clockwise {
+            corner_shift[(i + 1) % 4] = (-dy, dx);
+        } else {
+            corner_shift[(i + 3) % 4] = (dy, -dx);
+        }
+    }
     let (quarter_turns, crop) = if clockwise {
         (
             (current + 1) % 4,
@@ -151,6 +277,7 @@ pub fn quarter_turn(a: Adjust, clockwise: bool) -> Adjust {
                 cy: c.cx,
                 w: c.h,
                 h: c.w,
+                corner_shift,
             },
         )
     } else {
@@ -161,6 +288,7 @@ pub fn quarter_turn(a: Adjust, clockwise: bool) -> Adjust {
                 cy: -c.cx,
                 w: c.h,
                 h: c.w,
+                corner_shift,
             },
         )
     };
@@ -196,8 +324,18 @@ mod tests {
     }
 
     fn close_rect(a: CropRect, b: CropRect) -> bool {
-        close(a.cx, b.cx) && close(a.cy, b.cy) && close(a.w, b.w) && close(a.h, b.h)
+        close(a.cx, b.cx)
+            && close(a.cy, b.cy)
+            && close(a.w, b.w)
+            && close(a.h, b.h)
+            && a.corner_shift
+                .iter()
+                .zip(b.corner_shift)
+                .all(|(p, q)| close(p.0, q.0) && close(p.1, q.1))
     }
+
+    /// A frame with a different shift on every corner.
+    const SHIFTS: [(f32, f32); 4] = [(0.01, 0.02), (-0.03, 0.01), (0.02, -0.02), (-0.01, -0.04)];
 
     #[test]
     fn worked_example_1_quarter_turn() {
@@ -223,6 +361,7 @@ mod tests {
                 cy: -0.2,
                 w: 0.5,
                 h: 0.8,
+                corner_shift: SHIFTS,
             },
             ..Adjust::default()
         };
@@ -243,6 +382,7 @@ mod tests {
                 cy: -0.2,
                 w: 0.5,
                 h: 0.8,
+                corner_shift: SHIFTS,
             },
             ..Adjust::default()
         };
@@ -275,6 +415,7 @@ mod tests {
             cy: 0.0,
             w: 0.5,
             h: 1.0,
+            ..CropRect::default()
         };
         assert_eq!(output_size(base, crop, Resize::None), (800, 1200));
         assert_eq!(output_size(base, crop, Resize::LongEdge(600)), (400, 600));
@@ -298,7 +439,20 @@ mod tests {
     }
 
     fn rect(cx: f32, cy: f32, w: f32, h: f32) -> CropRect {
-        CropRect { cx, cy, w, h }
+        CropRect {
+            cx,
+            cy,
+            w,
+            h,
+            ..CropRect::default()
+        }
+    }
+
+    fn shifted(crop: CropRect, shift: [(f32, f32); 4]) -> CropRect {
+        CropRect {
+            corner_shift: shift,
+            ..crop
+        }
     }
 
     #[test]
@@ -390,5 +544,152 @@ mod tests {
         let crop = rect(0.2, -0.1, 0.5, 0.9);
         let there = turn_crop(crop, 1, 3);
         assert!(close_rect(turn_crop(there, 3, 1), crop));
+    }
+
+    #[test]
+    fn frame_corners_of_plain_frame_are_its_corners() {
+        let p = frame_corners(rect(0.1, -0.2, 0.4, 0.6));
+        let want = [(-0.1, -0.5), (0.3, -0.5), (0.3, 0.1), (-0.1, 0.1)];
+        for (got, want) in p.iter().zip(want) {
+            assert!(close(got.0, want.0) && close(got.1, want.1), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn frame_corners_add_the_shift() {
+        let crop = shifted(
+            rect(0.0, 0.0, 0.6, 0.6),
+            [(0.07, 0.0), (-0.07, 0.01), (0.0, 0.0), (0.02, -0.03)],
+        );
+        let p = frame_corners(crop);
+        let want = [(-0.23, -0.3), (0.23, -0.29), (0.3, 0.3), (-0.28, 0.27)];
+        for (got, want) in p.iter().zip(want) {
+            assert!(close(got.0, want.0) && close(got.1, want.1), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn rectangle_is_valid_quad() {
+        assert!(quad_ok(CropRect::default()));
+        assert!(quad_ok(rect(0.1, -0.2, 0.4, 0.6)));
+    }
+
+    #[test]
+    fn crossed_corners_are_not_valid() {
+        let crop = shifted(
+            rect(0.0, 0.0, 0.6, 0.6),
+            [(0.7, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        );
+        assert!(!quad_ok(crop));
+    }
+
+    #[test]
+    fn dented_frame_is_not_valid() {
+        let crop = shifted(
+            rect(0.0, 0.0, 0.6, 0.6),
+            [(0.0, 0.0), (0.0, 0.28), (-0.28, -0.28), (0.28, 0.0)],
+        );
+        assert!(!quad_ok(crop));
+    }
+
+    #[test]
+    fn nan_shift_is_not_valid() {
+        let crop = shifted(
+            rect(0.0, 0.0, 0.6, 0.6),
+            [(f32::NAN, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        );
+        assert!(!quad_ok(crop));
+    }
+
+    fn same_point(a: (f32, f32), b: (f32, f32)) -> bool {
+        close(a.0, b.0) && close(a.1, b.1)
+    }
+
+    const TRAPEZOID: [(f32, f32); 4] = [(-2.0, -3.0), (2.0, -3.0), (4.0, 3.0), (-4.0, 3.0)];
+
+    #[test]
+    fn square_to_quad_hits_the_corners() {
+        let map = SquareToQuad::new(TRAPEZOID);
+        for (unit, want) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+            .into_iter()
+            .zip(TRAPEZOID)
+        {
+            let got = map.apply(unit.0, unit.1);
+            assert!(same_point(got, want), "{unit:?} -> {got:?}");
+        }
+    }
+
+    #[test]
+    fn square_to_quad_centre_is_where_diagonals_cross() {
+        let got = SquareToQuad::new(TRAPEZOID).apply(0.5, 0.5);
+        assert!(same_point(got, (0.0, -1.0)), "{got:?}");
+    }
+
+    #[test]
+    fn square_to_quad_keeps_lines_straight() {
+        let map = SquareToQuad::new(TRAPEZOID);
+        for (t, want) in [(0.0, -3.0), (0.5, -1.0), (1.0, 3.0)] {
+            let got = map.apply(0.5, t);
+            assert!(same_point(got, (0.0, want)), "t {t} -> {got:?}");
+        }
+    }
+
+    #[test]
+    fn square_to_quad_of_rectangle_is_linear() {
+        let map = SquareToQuad::new([(-4.0, -3.0), (4.0, -3.0), (4.0, 3.0), (-4.0, 3.0)]);
+        let got = map.apply(0.25, 0.75);
+        assert!(same_point(got, (-2.0, 1.5)), "{got:?}");
+    }
+
+    #[test]
+    fn fit_scales_the_shift_too() {
+        let start = shifted(
+            rect(0.1, 0.0, 0.9, 0.9),
+            [(0.05, 0.02), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        );
+        let fitted = fit_inside(start, base_1600(), 6.0);
+        let k = fitted.w / start.w;
+        assert!(k < 1.0, "the frame should have shrunk");
+        assert!(close(fitted.corner_shift[0].0, 0.05 * k));
+        assert!(close(fitted.corner_shift[0].1, 0.02 * k));
+        assert!(frame_inside(fitted, base_1600(), 6.0));
+    }
+
+    #[test]
+    fn shifted_frame_outside_is_not_inside() {
+        let crop = shifted(
+            CropRect::default(),
+            [(-0.05, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        );
+        assert!(!frame_inside(crop, base_1600(), 0.0));
+    }
+
+    #[test]
+    fn output_size_of_trapezoid() {
+        let base = Size {
+            w: 1000.0,
+            h: 1000.0,
+        };
+        let crop = shifted(
+            rect(0.0, 0.0, 0.8, 0.6),
+            [(0.1, 0.0), (-0.1, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        );
+        assert_eq!(output_size(base, crop, Resize::None), (700, 608));
+    }
+
+    #[test]
+    fn quarter_turn_moves_shifts_round() {
+        let start = Adjust {
+            crop: shifted(
+                CropRect::default(),
+                [(0.01, 0.02), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+            ),
+            ..Adjust::default()
+        };
+        let cw = quarter_turn(start, true).crop.corner_shift;
+        assert!(same_point(cw[1], (-0.02, 0.01)), "{cw:?}");
+        assert!(same_point(cw[0], (0.0, 0.0)), "{cw:?}");
+        let ccw = quarter_turn(start, false).crop.corner_shift;
+        assert!(same_point(ccw[3], (0.02, -0.01)), "{ccw:?}");
     }
 }

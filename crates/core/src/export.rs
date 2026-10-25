@@ -206,6 +206,7 @@ mod tests {
                     cy: 0.0,
                     w: 0.5,
                     h: 1.0,
+                    ..CropRect::default()
                 },
                 ..Adjust::default()
             },

@@ -230,4 +230,41 @@ mod tests {
         assert!(!key.alternate);
         assert_eq!(key.brightness, 5);
     }
+
+    #[test]
+    fn frame_without_corner_shift_loads_as_rectangle() {
+        let dir = folder_with(&["page_001.jpg"]);
+        std::fs::write(
+            dir.path().join(SIDECAR_NAME),
+            r#"{"version":1,"sort":"name","keys":{"page_001.jpg":{"crop":{"cx":0.1,"cy":0.0,"w":0.7,"h":0.8}}}}"#,
+        )
+        .unwrap();
+        let saved = load(dir.path()).unwrap().unwrap();
+        let crop = saved.keys.get("page_001.jpg").unwrap().crop;
+        assert_eq!(crop.corner_shift, [(0.0, 0.0); 4]);
+        assert!((crop.w - 0.7).abs() < 1e-4);
+    }
+
+    #[test]
+    fn corner_shift_round_trips() {
+        let dir = folder_with(&["page_001.jpg"]);
+        let mut project = Project::open(dir.path()).unwrap();
+        let shift = [(0.07, 0.0), (-0.07, 0.0), (0.0, 0.02), (0.0, 0.0)];
+        project.set_key(
+            0,
+            Adjust {
+                crop: crate::model::CropRect {
+                    w: 0.7,
+                    h: 0.8,
+                    corner_shift: shift,
+                    ..crate::model::CropRect::default()
+                },
+                ..Adjust::default()
+            },
+        );
+        save(&project).unwrap();
+        let saved = load(dir.path()).unwrap().unwrap();
+        let key = saved.keys.get("page_001.jpg").unwrap();
+        assert_eq!(key.crop.corner_shift, shift);
+    }
 }

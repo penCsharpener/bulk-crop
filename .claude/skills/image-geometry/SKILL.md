@@ -33,6 +33,15 @@ Edges: `left = cx - w/2`, `right = cx + w/2`, `top = cy - h/2`, `bottom = cy + h
 
 Because the units are fractions, the same `CropRect` works on the full photo and on a small preview.
 
+The frame is a rectangle plus `corner_shift: [(f32, f32); 4]`: how far each corner is moved from the
+rectangle's corner, in the order NW, NE, SE, SW (clockwise on screen), x then y, in the same fractions
+as `cx`, `cy`. No shift (all zero) is the plain rectangle. `geometry::frame_corners(crop)` gives the
+four real corners in that order, from the image centre, in fractions of the base. Use it whenever the
+shape of the frame matters; `left`, `right`, `top` and `bottom` above are the rectangle's edges only.
+`geometry::quad_ok(crop)` says whether the four corners make a frame the export can straighten: every
+corner in its own quarter around `(cx, cy)` and the shape strictly convex. `Adjust::normalized` sets
+the shifts to zero when it is false.
+
 ## Rotation
 
 Screen coordinates have y pointing down. With that, this matrix turns a point **clockwise** for a
@@ -76,6 +85,12 @@ py = cy * hb + ((v + 0.5) / oh - 0.5) * ch
 (sx, sy) = inverse rotation of (px, py), plus (w0/2, h0/2)
 ```
 
+With a shifted frame the first two lines change. Use `s = (u + 0.5) / ow` and `t = (v + 0.5) / oh`,
+and let `geometry::SquareToQuad::new(corners).apply(s, t)` give `(px, py)`, where `corners` are
+`frame_corners(crop)` with x times `wb` and y times `hb` (NW, NE, SE, SW). Without a shift this is
+exactly the formula above (the map of a rectangle is linear), so nothing else changes. The inverse
+rotation and the sampling are the same.
+
 `(sx, sy)` is a continuous position where pixel `i` covers `i .. i+1` and its centre is `i + 0.5`.
 For bilinear sampling use `fx = sx - 0.5`, `fy = sy - 0.5`, then the four neighbours
 `floor(fx)`, `floor(fx)+1`, `floor(fy)`, `floor(fy)+1`.
@@ -86,6 +101,10 @@ Check: with `k = 0`, `a = 0`, full crop and `ow = w0`, pixel `u` gives `sx = u +
 The output equals the source exactly.
 
 ## Output size
+
+For a shifted frame `cw` and `ch` are the mean of opposite edges: `cw` is the mean of the top (NW to
+NE) and bottom (SW to SE) edge lengths, `ch` the mean of the left (NW to SW) and right (NE to SE)
+ones, each `hypot(dx · wb, dy · hb)`. Without a shift they are `w · wb` and `h · hb`.
 
 ```
 mid = (round(cw).max(1), round(ch).max(1))          size after rotate and crop
@@ -103,6 +122,10 @@ The frame must turn with the picture, so the same part of the page stays framed.
 
 - Clockwise: `k = (k + 1) % 4` and `{cx, cy, w, h}` becomes `{-cy, cx, h, w}`.
 - Counter-clockwise: `k = (k + 3) % 4` and `{cx, cy, w, h}` becomes `{cy, -cx, h, w}`.
+
+The corner shifts turn with the frame (`geometry::quarter_turn`). Clockwise, every corner moves one
+place on (NW → NE → SE → SW → NW) and each shift `(dx, dy)` becomes `(-dy, dx)`. Counter-clockwise,
+every corner moves one place back and `(dx, dy)` becomes `(dy, -dx)`.
 
 ## How far the frame may go
 
@@ -125,8 +148,10 @@ both:
 1. the upright base rectangle: every corner has `|x| <= 0.5` and `|y| <= 0.5`, and
 2. the turned picture: every corner, turned back by the fine angle, lies within the base rectangle.
 
-Use `geometry::{point_inside, frame_inside, fit_inside}` and `crop_edit::drag_inside`. `fit_inside`
-shrinks about the frame's centre and never grows it. The turn back is the formula of `frame_to_src` with
+Use `geometry::{point_inside, frame_inside, fit_inside}` and `crop_edit::drag_inside`. With corner
+shifts, "every corner" means the four `frame_corners`, not the rectangle's. A frame must also satisfy
+`geometry::quad_ok`. `fit_inside` shrinks about the frame's centre and never grows it; it scales `w`,
+`h` and `corner_shift` by one factor, which keeps `quad_ok`. The turn back is the formula of `frame_to_src` with
 only the fine angle; do not write a second version. `half_extents` is no longer used for dragging.
 
 ## Screen and frame space in the editor
