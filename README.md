@@ -106,25 +106,33 @@ top bar.
 
 The shortcuts do nothing while a text field has focus, so you can type in the output folder field.
 
-## The settings file: pagecrop.json
+## The settings file: pagecrop_vNN.json
 
-The settings live in `pagecrop.json`, in the photo folder. It is written when you change a page, and
+The settings live in `pagecrop_v05.json` (for version 0.5.x), in the photo folder. Each minor version
+of pagecrop has its own file: 0.6.x uses `pagecrop_v06.json`, 1.0.x uses `pagecrop_v10.json`. The file
+name is the version, so the file has no `version` field. It is written when you change a page, and
 under a temporary name first, so an interrupted save does not damage it. It holds:
 
-- `version`: the file format, currently 1.
 - `sort`: the order of the pages, Name or Date.
 - `keys`: one entry for each page that has its own settings, named by the photo's file name. Each entry
   has the turn (`quarter_turns`), the fine angle (`angle_deg`), the frame (`crop` with `cx`, `cy`, `w`
   and `h` as fractions of the picture), `brightness`, `contrast` and `grayscale`.
 - `export`: the output folder and the export options last used.
 
+pagecrop does not convert settings from an older version. A folder that has only an older file, for
+example `pagecrop.json` from 0.4, opens with the default settings, and the older file is never read,
+changed or deleted. To use the old settings, copy the file to the new name (for example
+`cp pagecrop.json pagecrop_v05.json`) and open the folder again. Whatever still fits is used. A part
+of the file that cannot be read, such as a page whose entry has a wrong type, is left out and has to
+be set again; pagecrop names what was left out. Fields it does not know are ignored.
+
 Settings for photos that are no longer in the folder are kept in the file, so removing a photo outside
 pagecrop does not lose them. A photo moved to the trash with the bin button takes its settings with
 it; if the page after it has none of its own, that page gets them, so it looks the same. A renamed
 photo does not get its settings back, because they are stored by file name.
 Your photos are never changed. The only exception is the bin button: after you confirm, it moves one
-photo to the desktop trash, from where you can restore it. pagecrop writes only `pagecrop.json` in the
-photo folder, and the pictures into the export folder, which it creates only when you start an export.
+photo to the desktop trash, from where you can restore it. pagecrop writes only its settings file (`pagecrop_v05.json`
+in 0.5) in the photo folder, and the pictures into the export folder, which it creates only when you start an export.
 
 ## Releases
 

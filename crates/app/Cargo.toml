@@ -13,7 +13,7 @@ path = "src/main.rs"
 eframe = { version = "0.36.2", features = ["persistence"] }
 egui = "0.36.2"
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
-pagecrop-core = { version = "0.4.0", path = "../core" }
+pagecrop-core = { version = "0.5.0", path = "../core" }
 rayon = "1.12.0"
 rfd = "0.17.2"
 

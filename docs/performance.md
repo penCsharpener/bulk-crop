@@ -44,7 +44,7 @@ defaults.
 | Check | Result |
 |---|---|
 | `sha256sum *.jpg` before and after, compared with `diff` | No difference: the originals are untouched |
-| New entries in the photo folder | `pagecrop.json` and `cropped` only |
+| New entries in the photo folder | `pagecrop_v05.json` and `cropped` only |
 | Pictures in `cropped` | 50, one per photo, all 1600 × 1200, no `.tmp` files left |
 | Pages that needed their own settings | 2 (pages 1 and 20; the undone change on page 10 is gone) |
 
