@@ -25,6 +25,10 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ),
     ("Drag a handle of the frame", "Move that edge or corner"),
     (
+        "Ctrl + drag a frame corner",
+        "Move that corner alone, for a page shot at an angle",
+    ),
+    (
         "Drag a round handle beside the frame",
         "Turn the picture in 0.1° steps",
     ),
