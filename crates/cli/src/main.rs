@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use pagecrop_core::decode::{format_taken, load_oriented, read_orientation};
 use pagecrop_core::encode::write_jpeg;
 use pagecrop_core::export::{ExportOptions, Outcome, Progress, plan, run};
-use pagecrop_core::geometry::Resize;
+use pagecrop_core::geometry::{Resize, quad_ok};
 use pagecrop_core::model::{Adjust, CropRect, Project, SortBy};
 use pagecrop_core::render::render;
 
@@ -75,6 +75,10 @@ enum Command {
         /// Frame as cx,cy,w,h in fractions of the picture.
         #[arg(long, default_value = "0,0,1,1", value_parser = parse_crop, allow_hyphen_values = true)]
         crop: CropRect,
+        /// How far each frame corner is shifted from the rectangle's corner, as
+        /// nwx,nwy,nex,ney,sex,sey,swx,swy in fractions of the picture.
+        #[arg(long, default_value = "0,0,0,0,0,0,0,0", value_parser = parse_corners, allow_hyphen_values = true)]
+        corners: [(f32, f32); 4],
         /// Shrink so the longer side is this many pixels at most.
         #[arg(long, conflicts_with = "percent")]
         long_edge: Option<u32>,
@@ -114,19 +118,27 @@ enum Command {
         /// on the left. `--drift` and `--reverse-mtime` do not apply.
         #[arg(long, conflicts_with_all = ["drift", "reverse_mtime"])]
         two_sided: bool,
+        /// Photograph the pages from below: the top edge of each page is this fraction narrower
+        /// than its bottom edge. `--drift`, `--reverse-mtime` and `--two-sided` do not apply.
+        #[arg(long, conflicts_with_all = ["drift", "reverse_mtime", "two_sided"])]
+        keystone: Option<f32>,
     },
 }
 
-/// Reads a crop frame written as `cx,cy,w,h`.
-fn parse_crop(text: &str) -> Result<CropRect, String> {
-    let values = text
-        .split(',')
+/// Reads a comma-separated list of finite numbers.
+fn parse_numbers(text: &str) -> Result<Vec<f32>, String> {
+    text.split(',')
         .map(|v| match v.trim().parse::<f32>() {
             Ok(n) if n.is_finite() => Ok(n),
             Ok(_) => Err(format!("{} is not a finite number", v.trim())),
             Err(err) => Err(err.to_string()),
         })
-        .collect::<Result<Vec<f32>, String>>()?;
+        .collect()
+}
+
+/// Reads a crop frame written as `cx,cy,w,h`.
+fn parse_crop(text: &str) -> Result<CropRect, String> {
+    let values = parse_numbers(text)?;
     match values.as_slice() {
         [cx, cy, w, h] => Ok(CropRect {
             cx: *cx,
@@ -136,6 +148,14 @@ fn parse_crop(text: &str) -> Result<CropRect, String> {
             ..CropRect::default()
         }),
         _ => Err("expected four numbers: cx,cy,w,h".to_owned()),
+    }
+}
+
+/// Reads corner shifts written as `nwx,nwy,nex,ney,sex,sey,swx,swy`.
+fn parse_corners(text: &str) -> Result<[(f32, f32); 4], String> {
+    match parse_numbers(text)?.as_slice() {
+        [a, b, c, d, e, f, g, h] => Ok([(*a, *b), (*c, *d), (*e, *f), (*g, *h)]),
+        _ => Err("expected eight numbers: nwx,nwy,nex,ney,sex,sey,swx,swy".to_owned()),
     }
 }
 
@@ -214,6 +234,7 @@ fn main() -> anyhow::Result<()> {
             turns,
             angle,
             crop,
+            corners,
             long_edge,
             percent,
             brightness,
@@ -225,6 +246,15 @@ fn main() -> anyhow::Result<()> {
                 !same_file(&file, &out),
                 "--out must not be the input file {}",
                 file.display()
+            );
+            let crop = CropRect {
+                corner_shift: corners,
+                ..crop
+            };
+            anyhow::ensure!(
+                corners == [(0.0, 0.0); 4] || quad_ok(crop),
+                "--corners {corners:?} do not make a valid frame with --crop: every corner must \
+                 stay in its own quarter around the frame's centre and the shape must be convex"
             );
             let src =
                 load_oriented(&file).with_context(|| format!("reading {}", file.display()))?;
@@ -276,8 +306,11 @@ fn main() -> anyhow::Result<()> {
             drift,
             reverse_mtime,
             two_sided,
+            keystone,
         } => {
-            let paths = if two_sided {
+            let paths = if let Some(squeeze) = keystone {
+                pagecrop_testkit::write_keystone_book(&dir, count, width, height, squeeze)
+            } else if two_sided {
                 pagecrop_testkit::write_two_sided_book(&dir, count, width, height)
             } else {
                 pagecrop_testkit::write_book(&dir, count, width, height, drift, reverse_mtime)

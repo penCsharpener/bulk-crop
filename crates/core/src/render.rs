@@ -3,11 +3,14 @@
 use image::imageops::{self, FilterType};
 use image::{DynamicImage, GrayImage, Rgb, RgbImage};
 
-use crate::geometry::{Resize, Size, base_size, frame_to_src, output_size};
+use crate::geometry::{
+    Resize, Size, SquareToQuad, base_size, frame_corners, frame_to_src, output_size,
+};
 use crate::model::Adjust;
 use crate::tone::{apply, lookup, lut, to_gray};
 
-/// The picture turned and cropped by `adj`, at `out_w` by `out_h` pixels. Pixels are sampled
+/// The picture turned and cropped by `adj`, at `out_w` by `out_h` pixels. The output rectangle is
+/// mapped onto the four-cornered frame, so a shifted frame is straightened. Pixels are sampled
 /// bilinearly; positions outside the source are white.
 pub fn rotate_crop(src: &RgbImage, adj: &Adjust, out_w: u32, out_h: u32) -> RgbImage {
     let (w0, h0) = src.dimensions();
@@ -17,12 +20,11 @@ pub fn rotate_crop(src: &RgbImage, adj: &Adjust, out_w: u32, out_h: u32) -> RgbI
     };
     let base = base_size(src_size, adj.quarter_turns);
     let crop = adj.crop;
-    let (cw, ch) = (crop.w * base.w, crop.h * base.h);
-    let (centre_x, centre_y) = (crop.cx * base.w, crop.cy * base.h);
+    let corners = frame_corners(crop).map(|(x, y)| (x * base.w, y * base.h));
+    let to_frame = SquareToQuad::new(corners);
     let (ow, oh) = (out_w as f32, out_h as f32);
     RgbImage::from_fn(out_w, out_h, |u, v| {
-        let px = centre_x + ((u as f32 + 0.5) / ow - 0.5) * cw;
-        let py = centre_y + ((v as f32 + 0.5) / oh - 0.5) * ch;
+        let (px, py) = to_frame.apply((u as f32 + 0.5) / ow, (v as f32 + 0.5) / oh);
         let (sx, sy) = frame_to_src((px, py), src_size, adj.quarter_turns, adj.angle_deg);
         sample(src, sx, sy)
     })
@@ -113,7 +115,7 @@ mod tests {
     use super::*;
     use crate::model::CropRect;
 
-    use pagecrop_testkit::page_image;
+    use pagecrop_testkit::{keystone_image, page_image};
 
     fn gradient(w: u32, h: u32) -> RgbImage {
         RgbImage::from_fn(w, h, |x, y| Rgb([(x * 30) as u8, (y * 50) as u8, 7]))
@@ -225,5 +227,105 @@ mod tests {
             render(&src, &adj, Resize::None),
             DynamicImage::ImageLuma8(_)
         ));
+    }
+
+    #[test]
+    fn keystoned_page_fills_the_frame() {
+        let img = keystone_image(800, 600, 0, 0.2);
+        let crop = CropRect {
+            cx: 0.0,
+            cy: 0.0,
+            w: 0.66,
+            h: 0.76,
+            corner_shift: [(0.068, 0.0), (-0.068, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        };
+        let straight = render_rgb(
+            &img,
+            &Adjust {
+                crop,
+                ..Adjust::default()
+            },
+            Resize::None,
+        );
+        let (w, h) = straight.dimensions();
+        let edge = (0..w)
+            .flat_map(|x| [(x, 0), (x, h - 1)])
+            .chain((0..h).flat_map(|y| [(0, y), (w - 1, y)]));
+        for (x, y) in edge {
+            assert!(straight.get_pixel(x, y).0[0] > 200, "edge pixel ({x},{y})");
+        }
+        let plain = render_rgb(
+            &img,
+            &Adjust {
+                crop: CropRect {
+                    corner_shift: [(0.0, 0.0); 4],
+                    ..crop
+                },
+                ..Adjust::default()
+            },
+            Resize::None,
+        );
+        assert!(plain.get_pixel(0, 0).0[0] < 100);
+    }
+
+    #[test]
+    fn shifted_render_has_output_size() {
+        let src = keystone_image(800, 600, 0, 0.2);
+        let crop = CropRect {
+            cx: 0.0,
+            cy: 0.0,
+            w: 0.66,
+            h: 0.76,
+            corner_shift: [(0.068, 0.0), (-0.068, 0.0), (0.0, 0.0), (0.0, 0.0)],
+        };
+        let adj = Adjust {
+            crop,
+            ..Adjust::default()
+        };
+        let base = Size { w: 800.0, h: 600.0 };
+        for resize in [Resize::None, Resize::LongEdge(300)] {
+            let out = render_rgb(&src, &adj, resize);
+            assert_eq!(out.dimensions(), output_size(base, crop, resize));
+        }
+    }
+
+    #[test]
+    fn no_shift_render_is_unchanged() {
+        let src = gradient(40, 30);
+        let crop = CropRect {
+            cx: 0.05,
+            cy: -0.03,
+            w: 0.7,
+            h: 0.6,
+            ..CropRect::default()
+        };
+        let adj = Adjust {
+            angle_deg: 1.3,
+            crop,
+            ..Adjust::default()
+        };
+        let (w0, h0) = src.dimensions();
+        let (ow, oh) = (28, 18);
+        let out = rotate_crop(&src, &adj, ow, oh);
+        // The old formula, written out: a linear map of the output pixel onto the frame.
+        let src_size = Size {
+            w: w0 as f32,
+            h: h0 as f32,
+        };
+        let expected = RgbImage::from_fn(ow, oh, |u, v| {
+            let px = crop.cx * 40.0 + ((u as f32 + 0.5) / ow as f32 - 0.5) * crop.w * 40.0;
+            let py = crop.cy * 30.0 + ((v as f32 + 0.5) / oh as f32 - 0.5) * crop.h * 30.0;
+            let (sx, sy) = frame_to_src((px, py), src_size, 0, 1.3);
+            sample(&src, sx, sy)
+        });
+        assert_eq!(out, expected);
+        let explicit = Adjust {
+            crop: CropRect {
+                corner_shift: [(0.0, 0.0); 4],
+                ..crop
+            },
+            ..adj
+        };
+        assert_eq!(rotate_crop(&src, &explicit, ow, oh), out);
     }
 }
